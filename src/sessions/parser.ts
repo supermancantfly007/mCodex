@@ -1,0 +1,185 @@
+import type { ThreadStatus, TimelineItem } from "../types.js";
+
+type JsonObject = Record<string, any>;
+
+const INTERNAL_CONTEXT_PREFIXES = [
+  "<environment_context>",
+  "<app-context>",
+  "<permissions instructions>",
+  "<skills_instructions>",
+];
+
+export function parseJsonLine(line: string): JsonObject | null {
+  try {
+    return JSON.parse(line) as JsonObject;
+  } catch {
+    return null;
+  }
+}
+
+export function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      const value = part as JsonObject;
+      return typeof value.text === "string"
+        ? value.text
+        : typeof value.content === "string"
+          ? value.content
+          : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function extractImages(content: unknown): Array<{ source: string; alt?: string }> {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((part, index) => {
+    if (!part || typeof part !== "object") return [];
+    const value = part as JsonObject;
+    const type = String(value.type ?? "").toLocaleLowerCase();
+    if (!type.includes("image") && value.image_url == null && value.imageUrl == null) return [];
+    const imageUrl = value.image_url ?? value.imageUrl;
+    const source = typeof imageUrl === "string"
+      ? imageUrl
+      : typeof imageUrl?.url === "string"
+        ? imageUrl.url
+        : [value.path, value.file_path, value.local_path, value.url].find((candidate) => typeof candidate === "string");
+    if (typeof source !== "string" || !source.trim()) return [];
+    const alt = typeof value.alt === "string" ? value.alt : typeof value.name === "string" ? value.name : `图片 ${index + 1}`;
+    return [{ source: source.trim(), alt }];
+  });
+}
+
+function displayJson(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function countContentLines(value: unknown): number {
+  if (typeof value !== "string" || !value) return 0;
+  const normalized = value.replace(/\r\n/g, "\n");
+  return normalized.split("\n").length - (normalized.endsWith("\n") ? 1 : 0);
+}
+
+function countUnifiedDiff(value: unknown): { additions: number; deletions: number } {
+  if (typeof value !== "string") return { additions: 0, deletions: 0 };
+  let additions = 0;
+  let deletions = 0;
+  for (const line of value.split(/\r?\n/)) {
+    if (/^\+(?!\+\+)/.test(line)) additions += 1;
+    else if (/^-(?!--)/.test(line)) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
+function patchActivity(payload: JsonObject): TimelineItem["activity"] | null {
+  if (payload.success === false || !payload.changes || typeof payload.changes !== "object") return null;
+  const files = Object.entries(payload.changes).flatMap(([sourcePath, rawChange]) => {
+    if (!rawChange || typeof rawChange !== "object") return [];
+    const change = rawChange as JsonObject;
+    const type = String(change.type ?? "");
+    let additions = 0;
+    let deletions = 0;
+    if (type === "add") additions = countContentLines(change.content);
+    else if (type === "delete") deletions = countContentLines(change.content);
+    else ({ additions, deletions } = countUnifiedDiff(change.unified_diff));
+    const targetPath = typeof change.move_path === "string" && change.move_path ? change.move_path : sourcePath;
+    return [{ path: targetPath, additions, deletions }];
+  });
+  if (!files.length) return null;
+  return {
+    type: "file_change",
+    fileCount: files.length,
+    additions: files.reduce((sum, file) => sum + file.additions, 0),
+    deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    files,
+  };
+}
+
+export function statusFromEvent(eventType: string): ThreadStatus | undefined {
+  if (["task_started", "turn_started"].includes(eventType)) return "running";
+  if (["task_complete", "turn_completed"].includes(eventType)) return "completed";
+  if (["turn_aborted", "task_aborted"].includes(eventType)) return "interrupted";
+  if (eventType === "error") return "error";
+  if (/approval|permission|authorization|consent/i.test(eventType) && /request|pending|needed|waiting/i.test(eventType)) return "waiting_approval";
+  return undefined;
+}
+
+export function timelineFromRecord(record: JsonObject, threadId: string, offset: number): TimelineItem | null {
+  const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
+  const payload = record.payload ?? {};
+  const id = `${threadId}:${offset}`;
+
+  if (record.type === "response_item") {
+    if (payload.type === "message") {
+      const text = extractText(payload.content).trim();
+      const images = extractImages(payload.content);
+      if (!text && !images.length) return null;
+      if (payload.role !== "user" && payload.role !== "assistant") return null;
+      if (payload.role === "user" && INTERNAL_CONTEXT_PREFIXES.some((prefix) => text.startsWith(prefix))) return null;
+      const role = payload.role;
+      return { id, threadId, timestamp, kind: "message", role, text, images, phase: typeof payload.phase === "string" ? payload.phase : undefined };
+    }
+    if (["function_call", "custom_tool_call"].includes(payload.type)) {
+      const name = payload.name ?? "tool";
+      return { id, threadId, timestamp, kind: "tool_call", role: "assistant", text: String(name), activity: { type: "command" } };
+    }
+    if (["function_call_output", "custom_tool_call_output"].includes(payload.type)) {
+      return { id, threadId, timestamp, kind: "tool_output", role: "tool", text: displayJson(payload.output ?? "") };
+    }
+    return null;
+  }
+
+  if (record.type === "event_msg") {
+    const eventType = String(payload.type ?? "");
+    if (eventType === "patch_apply_end") {
+      const activity = patchActivity(payload);
+      return activity ? { id, threadId, timestamp, kind: "tool_call", role: "assistant", text: "patch_apply_end", eventType, activity } : null;
+    }
+    const status = statusFromEvent(eventType);
+    if (status) {
+      return { id, threadId, timestamp, kind: "status", role: "system", text: status, eventType };
+    }
+    if (eventType === "agent_reasoning") {
+      const text = String(payload.text ?? "").trim().replace(/^\*\*(.+)\*\*$/s, "$1");
+      return text ? { id, threadId, timestamp, kind: "reasoning", role: "assistant", text, eventType } : null;
+    }
+  }
+  return null;
+}
+
+export function isVisibleTimelineItem(item: TimelineItem): boolean {
+  return item.kind === "message" || item.kind === "reasoning" || item.kind === "tool_call";
+}
+
+export function inferStatus(records: JsonObject[]): ThreadStatus {
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const record = records[i];
+    if (!record) continue;
+
+    if (record.type === "event_msg") {
+      const eventType = String(record.payload?.type ?? "");
+      const status = statusFromEvent(eventType);
+      if (status) return status;
+      // Recent reasoning without a later terminal lifecycle event still means the task is active.
+      if (eventType === "agent_reasoning") return "running";
+      continue;
+    }
+
+    if (record.type === "response_item") {
+      const payloadType = String(record.payload?.type ?? "");
+      if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output", "reasoning"].includes(payloadType)) {
+        return "running";
+      }
+    }
+  }
+  return "idle";
+}

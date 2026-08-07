@@ -1,0 +1,407 @@
+﻿[CmdletBinding()]
+param(
+  [string]$Command = ""
+)
+
+$ErrorActionPreference = "Stop"
+$Root = Split-Path -Parent $PSScriptRoot
+Set-Location -LiteralPath $Root
+
+$BridgePort = 3210
+$CdpPort = 9222
+$LogDir = Join-Path $Root ".run-logs"
+$BridgePidFile = Join-Path $LogDir "bridge.pid"
+$BridgeOut = Join-Path $LogDir "bridge.out.log"
+$BridgeErr = Join-Path $LogDir "bridge.err.log"
+$PackagedNode = Join-Path $Root "node.exe"
+$PackagedServer = Join-Path $Root "app\server.cjs"
+
+$script:NodeExe = $null
+$script:NpmCmd = $null
+$script:WingetCmd = $null
+
+function Write-Step([string]$Message) {
+  Write-Host ""
+  Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Fail([string]$Message) {
+  throw $Message
+}
+
+function Refresh-Path {
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $env:Path = "$machinePath;$userPath"
+}
+
+function Resolve-Winget {
+  $command = Get-Command winget.exe -ErrorAction SilentlyContinue
+  if ($command) {
+    $script:WingetCmd = $command.Source
+    return $true
+  }
+  return $false
+}
+
+function Ensure-Winget {
+  if (Resolve-Winget) { return }
+
+  Write-Step "Windows App Installer (winget) is required"
+  Write-Host "Opening the official Microsoft Store page. Install App Installer, then return here."
+  Start-Process "ms-windows-store://pdp/?productid=9NBLGGH4NNS1" | Out-Null
+  Read-Host "Press Enter after App Installer has finished installing"
+  Refresh-Path
+  if (-not (Resolve-Winget)) {
+    Fail "winget is still unavailable. Install Microsoft App Installer and run manage.bat again."
+  }
+}
+
+function Get-NodePath {
+  if (Test-Path -LiteralPath $PackagedNode) { return $PackagedNode }
+
+  $command = Get-Command node.exe -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+
+  $candidates = @(
+    (Join-Path ${env:ProgramFiles} "nodejs\node.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "nodejs\node.exe")
+  )
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+  }
+  return $null
+}
+
+function Test-SupportedNodeVersion([string]$Version) {
+  $match = [regex]::Match($Version, "^(?:v)?(\d+)\.(\d+)\.(\d+)")
+  if (-not $match.Success) { return $false }
+  $major = [int]$match.Groups[1].Value
+  $minor = [int]$match.Groups[2].Value
+  return (($major -eq 20 -and $minor -ge 19) -or ($major -eq 22 -and $minor -ge 12) -or ($major -gt 22))
+}
+
+function Resolve-Node {
+  $path = Get-NodePath
+  if (-not $path) { return $false }
+
+  $version = (& $path --version 2>$null).Trim()
+  if (-not (Test-SupportedNodeVersion $version)) {
+    Write-Host "Found Node.js $version, but this project needs 20.19+ or 22.12+." -ForegroundColor Yellow
+    return $false
+  }
+
+  $script:NodeExe = $path
+  $nodeDir = Split-Path -Parent $path
+  $env:Path = "$nodeDir;$env:Path"
+  $npmCandidate = Join-Path $nodeDir "npm.cmd"
+  if (Test-Path -LiteralPath $npmCandidate) {
+    $script:NpmCmd = $npmCandidate
+  } else {
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($npm) { $script:NpmCmd = $npm.Source }
+  }
+  return [bool]$script:NpmCmd
+}
+
+function Ensure-Node {
+  if (Resolve-Node) {
+    Write-Host "Node.js is ready: $((& $script:NodeExe --version).Trim())" -ForegroundColor Green
+    Write-Host "npm is ready: $((& $script:NpmCmd --version).Trim())" -ForegroundColor Green
+    return
+  }
+
+  Ensure-Winget
+  Write-Step "Installing a supported Node.js LTS release"
+  & $script:WingetCmd install --id OpenJS.NodeJS.LTS --exact --source winget --force --silent --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "winget could not install Node.js automatically." -ForegroundColor Yellow
+    Start-Process "https://nodejs.org/en/download" | Out-Null
+    Read-Host "Install Node.js 20.19+ or 22.12+, then press Enter"
+  }
+  Refresh-Path
+  if (-not (Resolve-Node)) {
+    Fail "A supported Node.js/npm installation was not found. Run manage.bat again after installing it."
+  }
+  Write-Host "Node.js is ready: $((& $script:NodeExe --version).Trim())" -ForegroundColor Green
+}
+
+function Test-CodexInstalled {
+  return [bool](Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue)
+}
+
+function Ensure-Codex {
+  if (Test-CodexInstalled) {
+    Write-Host "Codex Desktop is installed." -ForegroundColor Green
+    return
+  }
+  if (-not (Test-CodexInstalled)) {
+    Fail "Codex Desktop (ChatGPT) was not found. Install it first, then run manage.bat again."
+  }
+}
+
+function Invoke-Npm([string[]]$Arguments) {
+  & $script:NpmCmd @Arguments
+  if ($LASTEXITCODE -ne 0) { Fail "npm command failed: npm $($Arguments -join ' ')" }
+}
+
+function Ensure-Dependencies {
+  if (Test-Path -LiteralPath $PackagedServer) {
+    Write-Host "Bundled runtime dependencies are ready." -ForegroundColor Green
+    return
+  }
+
+  $packageLock = Join-Path $Root "package-lock.json"
+  $modules = Join-Path $Root "node_modules"
+  $needsInstall = -not (Test-Path -LiteralPath $modules)
+  if (-not $needsInstall -and (Test-Path -LiteralPath $packageLock)) {
+    $needsInstall = (Get-Item -LiteralPath $packageLock).LastWriteTimeUtc -gt (Get-Item -LiteralPath $modules).LastWriteTimeUtc
+  }
+  if (-not $needsInstall) {
+    Write-Host "npm dependencies are ready." -ForegroundColor Green
+    return
+  }
+
+  Write-Step "Installing project dependencies"
+  Invoke-Npm @("ci")
+  Write-Host "Dependencies are ready." -ForegroundColor Green
+}
+
+function Ensure-Build {
+  if (Test-Path -LiteralPath $PackagedServer) {
+    Write-Host "Packaged production build is ready." -ForegroundColor Green
+    return
+  }
+
+  $output = Join-Path $Root "dist\server\index.js"
+  $needsBuild = -not (Test-Path -LiteralPath $output)
+  if (-not $needsBuild) {
+    $outputTime = (Get-Item -LiteralPath $output).LastWriteTimeUtc
+    $sourceFiles = Get-ChildItem -LiteralPath (Join-Path $Root "src"), (Join-Path $Root "web"), (Join-Path $Root "vite.config.ts"), (Join-Path $Root "tsconfig.server.json") -Recurse -File -ErrorAction SilentlyContinue
+    $needsBuild = [bool]($sourceFiles | Where-Object { $_.LastWriteTimeUtc -gt $outputTime } | Select-Object -First 1)
+  }
+  if (-not $needsBuild) {
+    Write-Host "Production build is ready." -ForegroundColor Green
+    return
+  }
+
+  Write-Step "Building the server and mobile web app"
+  Invoke-Npm @("run", "build")
+  Write-Host "Production build is ready." -ForegroundColor Green
+}
+
+function Test-Http([string]$Url) {
+  try {
+    $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+    return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+  } catch {
+    return $false
+  }
+}
+
+function Wait-Http([string]$Url, [int]$Seconds = 30, [string]$Label = "服务") {
+  $started = Get-Date
+  $deadline = $started.AddSeconds($Seconds)
+  $nextUpdate = $started.AddSeconds(10)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Http $Url) { return $true }
+    if ((Get-Date) -ge $nextUpdate) {
+      $elapsed = [int]((Get-Date) - $started).TotalSeconds
+      Write-Host "$Label 仍在启动（已等待 $elapsed 秒）..." -ForegroundColor Yellow
+      $nextUpdate = $nextUpdate.AddSeconds(10)
+    }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+function Test-Cdp {
+  foreach ($hostName in @("localhost", "127.0.0.1", "::1")) {
+    $url = if ($hostName -eq "::1") {
+      "http://[$hostName]:$CdpPort/json/version"
+    } else {
+      "http://$hostName`:$CdpPort/json/version"
+    }
+    if (Test-Http $url) { return $true }
+  }
+  return $false
+}
+
+function Wait-Cdp([int]$Seconds = 120) {
+  $started = Get-Date
+  $deadline = $started.AddSeconds($Seconds)
+  $nextUpdate = $started.AddSeconds(15)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Cdp) { return $true }
+    if ((Get-Date) -ge $nextUpdate) {
+      $elapsed = [int]((Get-Date) - $started).TotalSeconds
+      Write-Host "Codex is still initializing ($elapsed seconds)..." -ForegroundColor Yellow
+      $nextUpdate = $nextUpdate.AddSeconds(15)
+    }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+function Stop-BridgeServices {
+  $ids = @()
+  foreach ($file in @($BridgePidFile)) {
+    if (Test-Path -LiteralPath $file) {
+      $value = (Get-Content -LiteralPath $file -ErrorAction SilentlyContinue | Select-Object -First 1)
+      if ($value -match '^\d+$') { $ids += [int]$value }
+      Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    }
+  }
+  $connections = Get-NetTCPConnection -LocalPort $BridgePort -State Listen -ErrorAction SilentlyContinue
+  $ids += @($connections | Select-Object -ExpandProperty OwningProcess)
+  foreach ($id in ($ids | Select-Object -Unique)) {
+    try { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } catch {}
+  }
+}
+
+function Start-CodexControl {
+  if (Test-Cdp) {
+    Write-Host "Codex 控制通道已在线。" -ForegroundColor Green
+    return
+  }
+  Write-Step "启动 Codex Desktop（本地控制通道）"
+  Write-Host "正在打开 Codex。首次启动或首次创建配置时可能需要等待一两分钟。" -ForegroundColor Yellow
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\start-codex-cdp.ps1")
+  if ($LASTEXITCODE -ne 0 -or -not (Wait-Cdp 120)) {
+    Fail "Codex 控制通道在 120 秒内没有就绪。请完全退出 Codex Desktop 后重新运行 manage.bat。"
+  }
+  Write-Host "Codex 控制通道已在线：http://localhost:$CdpPort" -ForegroundColor Green
+}
+
+function Get-LanAddresses {
+  try {
+    return @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+      Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+      Select-Object -ExpandProperty IPAddress)
+  } catch {
+    return @()
+  }
+}
+
+function Show-PairingInfo {
+  if (-not (Test-Path -LiteralPath $BridgeOut)) {
+  Write-Host "配对码记录在：$BridgeOut"
+    return
+  }
+  $text = Get-Content -LiteralPath $BridgeOut -Raw -ErrorAction SilentlyContinue
+  $match = [regex]::Match($text, "(?:Pairing code[^:]*:|手机配对码[^：:]*[：:])\s*([A-Z0-9]{8})")
+  if ($match.Success) {
+    Write-Host "手机配对码：$($match.Groups[1].Value)（有效期 10 分钟）" -ForegroundColor Yellow
+  } else {
+    Write-Host "配对码记录在：$BridgeOut"
+  }
+}
+
+function Start-Bridge([string]$HostAddress = "0.0.0.0", [bool]$RequireCdp = $true) {
+  Ensure-Dependencies
+  Ensure-Build
+  Stop-BridgeServices
+  if (-not (Test-Path -LiteralPath $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+
+  $env:BRIDGE_HOST = $HostAddress
+  $env:BRIDGE_PORT = "$BridgePort"
+  $serverEntry = if (Test-Path -LiteralPath $PackagedServer) { "app/server.cjs" } else { "dist/server/index.js" }
+  $process = Start-Process -FilePath $script:NodeExe -ArgumentList $serverEntry -WorkingDirectory $Root -RedirectStandardOutput $BridgeOut -RedirectStandardError $BridgeErr -WindowStyle Hidden -PassThru
+  Set-Content -LiteralPath $BridgePidFile -Value $process.Id -Encoding ascii
+
+  Write-Host "正在等待 Bridge 服务：http://127.0.0.1:$BridgePort ..."
+  if (-not (Wait-Http "http://127.0.0.1:$BridgePort/api/health" 30 "Bridge 服务")) {
+    Write-Host "Bridge 启动失败，请查看：$BridgeErr" -ForegroundColor Red
+    Fail "Bridge 服务没有在 30 秒内就绪。"
+  }
+  if ($RequireCdp -and -not (Test-Cdp)) {
+    Stop-BridgeServices
+    Fail "Bridge 已启动，但 Codex 控制通道离线。"
+  }
+
+  Write-Host ""
+  Write-Host "Codex 远程桥接已启动。" -ForegroundColor Green
+  Write-Host "电脑端页面：http://127.0.0.1:$BridgePort/"
+  if ($HostAddress -ne "127.0.0.1") {
+    foreach ($address in (Get-LanAddresses | Select-Object -Unique)) {
+      Write-Host "手机访问地址：http://$address`:$BridgePort/"
+    }
+    Write-Host "请在电脑端页面查看二维码，用手机扫描后连接。" -ForegroundColor Yellow
+    Show-PairingInfo
+  }
+  Start-Process "http://127.0.0.1:$BridgePort/" | Out-Null
+}
+
+function Install-DependenciesOnly {
+  Ensure-Node
+  Ensure-Dependencies
+}
+
+function Build-Only {
+  Ensure-Node
+  Ensure-Dependencies
+  Ensure-Build
+}
+
+function Show-Status {
+  Write-Host ""
+  Write-Host "===== mCodex Status ====="
+  if (Get-NetTCPConnection -LocalPort $BridgePort -State Listen -ErrorAction SilentlyContinue) {
+    Write-Host "  [ONLINE]  Bridge :$BridgePort" -ForegroundColor Green
+  } else {
+    Write-Host "  [OFFLINE] Bridge :$BridgePort" -ForegroundColor Yellow
+  }
+  if (Test-Cdp) {
+    Write-Host "  [ONLINE]  Codex control" -ForegroundColor Green
+  } else {
+    Write-Host "  [OFFLINE] Codex control" -ForegroundColor Yellow
+  }
+  Write-Host "Logs: $LogDir"
+}
+
+function Show-Logs {
+  Write-Host "===== Bridge output ====="
+  if (Test-Path -LiteralPath $BridgeOut) { Get-Content -LiteralPath $BridgeOut -Tail 40 }
+  Write-Host ""
+  Write-Host "===== Bridge errors ====="
+  if (Test-Path -LiteralPath $BridgeErr) { Get-Content -LiteralPath $BridgeErr -Tail 40 }
+}
+
+try {
+  $interactive = [string]::IsNullOrWhiteSpace($Command)
+  if ($interactive) { $Command = "start" }
+
+  switch ($Command.ToLowerInvariant()) {
+    "start" {
+      Write-Host "mCodex setup" -ForegroundColor Cyan
+      Ensure-Node
+      Ensure-Codex
+      Ensure-Dependencies
+      Ensure-Build
+      Start-CodexControl
+      Start-Bridge "0.0.0.0" $true
+    }
+    "restart" { Ensure-Node; Ensure-Codex; Start-CodexControl; Start-Bridge "0.0.0.0" $true }
+    "install" { Install-DependenciesOnly }
+    "build" { Build-Only }
+    "cdp" { Ensure-Node; Ensure-Codex; Start-CodexControl }
+    "lan" { Ensure-Node; Start-Bridge "0.0.0.0" $false }
+    "stop" { Stop-BridgeServices; Write-Host "Bridge 服务已停止。" }
+    "status" { Show-Status }
+    "logs" { Show-Logs }
+    "open" { Start-Process "http://127.0.0.1:$BridgePort/" | Out-Null }
+    default {
+      Write-Host "用法：manage.bat [start|restart|stop|status|install|build|cdp|lan|logs|open]"
+      exit 2
+    }
+  }
+  if ($interactive) {
+    Write-Host ""
+    Write-Host "启动完成。请保持此窗口打开，以便查看运行状态。"
+    Read-Host "按 Enter 关闭"
+  }
+} catch {
+  Write-Host ""
+  Write-Host "错误：$($_.Exception.Message)" -ForegroundColor Red
+  exit 1
+}
