@@ -15,6 +15,16 @@ import type { BridgeEvent } from "./types.js";
 
 class BadRequestError extends Error {}
 
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase().split("%")[0];
+  return normalized === "::1" || /^127(?:\.\d{1,3}){3}$/.test(normalized) || /^::ffff:127(?:\.\d{1,3}){3}$/.test(normalized);
+}
+
+export function mayUseQueryToken(method: string, requestPath: string): boolean {
+  return method.toUpperCase() === "GET" && requestPath === "/media";
+}
+
 function tokenMatches(candidate: string): boolean {
   if (!config.token) return true;
   const expected = Buffer.from(config.token);
@@ -24,7 +34,7 @@ function tokenMatches(candidate: string): boolean {
 
 function auth(req: Request, res: Response, next: NextFunction): void {
   const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
-  const queryToken = typeof req.query.token === "string" ? req.query.token : "";
+  const queryToken = mayUseQueryToken(req.method, req.path) && typeof req.query.token === "string" ? req.query.token : "";
   if (!tokenMatches(bearer || queryToken)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -62,7 +72,11 @@ export async function createBridge() {
   // Four 10 MB images expand to roughly 53.4 MB when encoded as Base64.
   app.use(express.json({ limit: "60mb" }));
   app.get("/api/health", (_req, res) => res.json({ ok: true, authRequired: Boolean(config.token), pairingAvailable: Boolean(config.external && Date.now() < pairingExpiresAt) }));
-  app.get("/api/pairing-info", (_req, res) => {
+  app.get("/api/pairing-info", (req, res) => {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      res.status(403).json({ error: "Pairing information is only available on this computer" });
+      return;
+    }
     const addresses = Object.values(os.networkInterfaces()).flatMap((entries) => entries ?? [])
       .filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254."))
       .map((entry) => entry.address);
@@ -226,7 +240,8 @@ export async function createBridge() {
   app.get("/*splat", (_req, res) => res.sendFile(path.join(webRoot, "index.html")));
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error(error);
-    res.status(error instanceof BadRequestError ? 400 : 500).json({ error: error instanceof Error ? error.message : "Internal error" });
+    const badRequest = error instanceof BadRequestError;
+    res.status(badRequest ? 400 : 500).json({ error: badRequest ? error.message : "Internal server error" });
   });
 
   const server = app.listen(config.port, config.host);

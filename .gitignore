@@ -1,6 +1,11 @@
 node_modules/
 dist/
 .env
+*.tsbuildinfo
+coverage/
 *.log
 .run-logs/
 release/
+remote-bridge-token
+Thumbs.db
+.DS_Store

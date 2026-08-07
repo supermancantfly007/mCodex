@@ -13,6 +13,8 @@ Codex Desktop 的本地移动工作台。
   <img src="https://img.shields.io/badge/status-experimental-f59e0b?style=flat-square" alt="Experimental" />
 </p>
 
+English documentation: [README.en.md](README.en.md). See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and [SECURITY.md](SECURITY.md) before enabling LAN access.
+
 </div>
 
 > **非官方项目。** mCodex 不是 OpenAI 产品，也不修改 Codex Desktop 的会话文件。它通过本地 CDP 控制桌面端，并读取本机 `CODEX_HOME` 下的会话记录。
@@ -181,7 +183,7 @@ npm test -- --run # Vitest 测试
 
 ## API 速览
 
-所有 `/api/*`（`/api/health` 和 `/api/pair` 除外）以及 `/ws` 都需要 `Authorization: Bearer <token>`；WebSocket 使用 `?token=<token>`。
+所有 `/api/*`（`/api/health`、`/api/pair` 和仅限本机访问的 `/api/pairing-info` 除外）以及 `/ws` 都需要 Token。API 默认使用 `Authorization: Bearer <token>`；图片读取 `/api/media` 和 WebSocket 使用 `?token=<token>`。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
