@@ -80,7 +80,7 @@ function Build-SourceRelease {
 
   foreach ($file in @(
     ".env.example", ".gitattributes", ".gitignore", "CHANGELOG.md", "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md", "LICENSE", "README.md", "README.en.md", "SECURITY.md", "manage.bat",
+    "CONTRIBUTING.md", "LICENSE", "README.md", "README_ZH.md", "SECURITY.md", "manage.bat",
     "package.json", "package-lock.json", "tsconfig.json", "tsconfig.server.json",
     "vite.config.ts", "vitest.config.ts"
   )) {
@@ -110,7 +110,7 @@ function Build-PortableRelease {
   Copy-Item -LiteralPath (Join-Path $Root "manage.bat") -Destination (Join-Path $stage "start.bat")
   Copy-Item -LiteralPath (Join-Path $Root "LICENSE") -Destination $stage
   Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination $stage
-  Copy-Item -LiteralPath (Join-Path $Root "README.en.md") -Destination $stage
+  Copy-Item -LiteralPath (Join-Path $Root "README_ZH.md") -Destination $stage
   Copy-Item -LiteralPath (Join-Path $Root "SECURITY.md") -Destination $stage
   Copy-Item -LiteralPath (Join-Path $Root "node_modules\playwright-core\package.json") -Destination (Join-Path $stage "package.json")
   Copy-Item -LiteralPath (Join-Path $Root "node_modules\playwright-core\browsers.json") -Destination (Join-Path $stage "browsers.json")
