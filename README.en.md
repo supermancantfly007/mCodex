@@ -1,16 +1,18 @@
 # mCodex
 
-An unofficial local mobile workbench for Codex Desktop on Windows.
+View and control Codex Desktop on Windows from a phone browser.
 
-mCodex reads Codex session JSONL files and uses the local Chrome DevTools Protocol connection to let a phone or another browser view and control tasks over a trusted LAN. It does not modify session files and is not affiliated with OpenAI.
+mCodex runs locally. It reads session records from `CODEX_HOME` and uses CDP to control Codex Desktop over a trusted LAN. It does not modify session files.
 
-## Highlights
+This is an unofficial project and is not affiliated with OpenAI.
+
+## Features
 
 - View projects, conversations, timelines, and live task status
 - Send messages, follow-ups, stop tasks, and handle approvals
 - Attach and preview images
 - Create projects and tasks from a phone
-- Pair devices with a short-lived code and a persistent trust token
+- Pair a device with a short-lived code
 - Run from source, a portable ZIP, or a Windows SEA executable
 
 ## Quick start
@@ -29,4 +31,3 @@ mCodex does not include telemetry or upload conversation data. It is designed fo
 ## License
 
 MIT. See [LICENSE](LICENSE).
-

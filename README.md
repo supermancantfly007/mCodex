@@ -1,47 +1,33 @@
-<div align="center">
-
 # mCodex
 
-Codex Desktop 的本地移动工作台。
+在手机浏览器里查看和操作 Windows 上的 Codex Desktop。
 
-把 Windows 本机上的 Codex Desktop，变成一个可从手机访问的任务工作台。
+[English](README.en.md) · [参与贡献](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
-<p>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2B-2563eb?style=flat-square" alt="Windows 10+" />
-  <img src="https://img.shields.io/badge/Node.js-20.19%2B%20%7C%2022.12%2B-16a34a?style=flat-square" alt="Node.js" />
-  <img src="https://img.shields.io/badge/TypeScript-5.9-3178c6?style=flat-square" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/status-experimental-f59e0b?style=flat-square" alt="Experimental" />
-</p>
+这是一个非官方项目，与 OpenAI 无关。mCodex 在本机运行，读取 `CODEX_HOME` 中的会话记录，并通过 CDP 操作 Codex Desktop。它不会修改会话文件。
 
-English documentation: [README.en.md](README.en.md). See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and [SECURITY.md](SECURITY.md) before enabling LAN access.
-
-</div>
-
-> **非官方项目。** mCodex 不是 OpenAI 产品，也不修改 Codex Desktop 的会话文件。它通过本地 CDP 控制桌面端，并读取本机 `CODEX_HOME` 下的会话记录。
-
-## 你可以做什么
+## 功能
 
 - 在手机浏览器中按项目查看 Codex 对话和实时进度
-- 实时显示 Desktop 正在生成的回答，并在完成后无缝切换为会话记录
+- 查看 Desktop 正在生成的回答
 - 选择或粘贴图片后预览并发送，历史消息中的图片也可直接查看
 - 打开任务、发送消息、停止任务，并处理审批请求
-- 查看并切换与 Codex Desktop 同步的权限模式
+- 查看和切换 Codex Desktop 的权限模式
 - 查看结构化文件修改卡片、文件路径及增删行数
 - 创建项目和新建任务
-- 通过局域网访问，默认面向同一局域网内的手机和电脑
-- 会话记录只读，桌面操作仍由 Codex Desktop 执行
+- 通过局域网从手机或另一台电脑访问
 
 ## 工作方式
 
 ```mermaid
 flowchart LR
-    phone["手机浏览器"] <-->|HTTP + WebSocket| bridge["mCodex<br/>127.0.0.1:3210"]
-    bridge -->|只读| files["CODEX_HOME<br/>会话 JSONL"]
-    bridge -->|本地 CDP| desktop["Codex Desktop<br/>localhost:9222"]
+    phone["手机浏览器"] <-->|HTTP + WebSocket| bridge["mCodex :3210"]
+    bridge -->|只读| files["CODEX_HOME 会话 JSONL"]
+    bridge -->|本地 CDP| desktop["Codex Desktop :9222"]
     desktop -->|实时运行状态| bridge
 ```
 
-mCodex 从会话 JSONL 解析时间线，从 Desktop CDP 获取真实运行状态，再把两者合并后推送到手机。发送、切换、停止、审批和创建任务都走 CDP，不直接写入会话文件。
+mCodex 从会话 JSONL 中读取对话和任务记录，从 Desktop CDP 获取运行状态。发送消息、停止任务、处理审批和创建任务都由 Codex Desktop 执行。
 
 ## 环境要求
 
@@ -58,7 +44,7 @@ mCodex 从会话 JSONL 解析时间线，从 Desktop CDP 获取真实运行状�
 
 ## 快速开始
 
-### 一键启动（推荐）
+### 使用管理脚本
 
 在项目根目录双击 `manage.bat`，或在命令提示符中运行：
 
@@ -66,7 +52,7 @@ mCodex 从会话 JSONL 解析时间线，从 Desktop CDP 获取真实运行状�
 manage.bat start
 ```
 
-在已安装 Codex Desktop（ChatGPT）的新电脑上，脚本会按顺序检测并处理：
+脚本会按顺序执行以下操作：
 
 1. 检查 `winget`；缺少时打开 Microsoft App Installer 安装页
 2. 检查兼容版本的 Node.js/npm；缺少时通过 `winget` 安装 Node.js LTS
