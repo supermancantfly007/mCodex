@@ -16,6 +16,22 @@ $BridgeErr = Join-Path $LogDir "bridge.err.log"
 $PackagedNode = Join-Path $Root "node.exe"
 $PackagedServer = Join-Path $Root "app\server.cjs"
 
+$requestedLocale = [string]$env:MCODEX_LOCALE
+if ($requestedLocale -match '^en(?:-|$)') {
+  $script:Locale = "en-US"
+} elseif ($requestedLocale -match '^zh(?:-|$)') {
+  $script:Locale = "zh-CN"
+} elseif ([Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName -eq "en") {
+  $script:Locale = "en-US"
+} else {
+  $script:Locale = "zh-CN"
+}
+
+function T([string]$Chinese, [string]$English) {
+  if ($script:Locale -eq "en-US") { return $English }
+  return $Chinese
+}
+
 $script:NodeExe = $null
 $script:NpmCmd = $null
 $script:WingetCmd = $null
@@ -207,7 +223,7 @@ function Wait-Http([string]$Url, [int]$Seconds = 30, [string]$Label = "服务") 
     if (Test-Http $Url) { return $true }
     if ((Get-Date) -ge $nextUpdate) {
       $elapsed = [int]((Get-Date) - $started).TotalSeconds
-      Write-Host "$Label 仍在启动（已等待 $elapsed 秒）..." -ForegroundColor Yellow
+      Write-Host (T "$Label 仍在启动（已等待 $elapsed 秒）..." "$Label is still starting (waited $elapsed seconds)...") -ForegroundColor Yellow
       $nextUpdate = $nextUpdate.AddSeconds(10)
     }
     Start-Sleep -Seconds 1
@@ -261,16 +277,16 @@ function Stop-BridgeServices {
 
 function Start-CodexControl {
   if (Test-Cdp) {
-    Write-Host "Codex 控制通道已在线。" -ForegroundColor Green
+    Write-Host (T "Codex 控制通道已在线。" "Codex control channel is already online.") -ForegroundColor Green
     return
   }
-  Write-Step "启动 Codex Desktop（本地控制通道）"
-  Write-Host "正在打开 Codex。首次启动或首次创建配置时可能需要等待一两分钟。" -ForegroundColor Yellow
+  Write-Step (T "启动 Codex Desktop（本地控制通道）" "Starting Codex Desktop (local control channel)")
+  Write-Host (T "正在打开 Codex。首次启动或首次创建配置时可能需要等待一两分钟。" "Opening Codex. First launch or first-time setup may take a minute or two.") -ForegroundColor Yellow
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\start-codex-cdp.ps1")
   if ($LASTEXITCODE -ne 0 -or -not (Wait-Cdp 120)) {
-    Fail "Codex 控制通道在 120 秒内没有就绪。请完全退出 Codex Desktop 后重新运行 manage.bat。"
+    Fail (T "Codex 控制通道在 120 秒内没有就绪。请完全退出 Codex Desktop 后重新运行 manage.bat。" "Codex control channel did not become ready within 120 seconds. Fully quit Codex Desktop and run manage.bat again.")
   }
-  Write-Host "Codex 控制通道已在线：http://localhost:$CdpPort" -ForegroundColor Green
+  Write-Host (T "Codex 控制通道已在线：http://localhost:$CdpPort" "Codex control channel is online: http://localhost:$CdpPort") -ForegroundColor Green
 }
 
 function Get-LanAddresses {
@@ -284,16 +300,26 @@ function Get-LanAddresses {
 }
 
 function Show-PairingInfo {
-  if (-not (Test-Path -LiteralPath $BridgeOut)) {
-  Write-Host "配对码记录在：$BridgeOut"
-    return
+  $pairingCode = $null
+  try {
+    $info = Invoke-RestMethod -Uri "http://127.0.0.1:$BridgePort/api/pairing-info" -TimeoutSec 3
+    if ($info.available -and $info.pairingCode -match '^[A-Z0-9]{8}$') {
+      $pairingCode = $info.pairingCode
+    }
+  } catch {}
+
+  if (-not $pairingCode -and (Test-Path -LiteralPath $BridgeOut)) {
+    $text = Get-Content -LiteralPath $BridgeOut -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    $match = [regex]::Match($text, "(?:Pairing code[^:]*:|手机配对码[^：:]*[：:])\s*([A-Z0-9]{8})")
+    if ($match.Success) {
+      $pairingCode = $match.Groups[1].Value
+    }
   }
-  $text = Get-Content -LiteralPath $BridgeOut -Raw -ErrorAction SilentlyContinue
-  $match = [regex]::Match($text, "(?:Pairing code[^:]*:|手机配对码[^：:]*[：:])\s*([A-Z0-9]{8})")
-  if ($match.Success) {
-    Write-Host "手机配对码：$($match.Groups[1].Value)（有效期 10 分钟）" -ForegroundColor Yellow
+
+  if ($pairingCode) {
+    Write-Host (T "手机配对码：$pairingCode（有效期 10 分钟）" "Phone pairing code: $pairingCode (valid for 10 minutes)") -ForegroundColor Yellow
   } else {
-    Write-Host "配对码记录在：$BridgeOut"
+    Write-Host (T "暂未读取到配对码，请在电脑端页面查看。日志：$BridgeOut" "Pairing code is not available yet. Check the computer page. Log: $BridgeOut") -ForegroundColor Yellow
   }
 }
 
@@ -309,24 +335,24 @@ function Start-Bridge([string]$HostAddress = "0.0.0.0", [bool]$RequireCdp = $tru
   $process = Start-Process -FilePath $script:NodeExe -ArgumentList $serverEntry -WorkingDirectory $Root -RedirectStandardOutput $BridgeOut -RedirectStandardError $BridgeErr -WindowStyle Hidden -PassThru
   Set-Content -LiteralPath $BridgePidFile -Value $process.Id -Encoding ascii
 
-  Write-Host "正在等待 Bridge 服务：http://127.0.0.1:$BridgePort ..."
-  if (-not (Wait-Http "http://127.0.0.1:$BridgePort/api/health" 30 "Bridge 服务")) {
-    Write-Host "Bridge 启动失败，请查看：$BridgeErr" -ForegroundColor Red
-    Fail "Bridge 服务没有在 30 秒内就绪。"
+  Write-Host (T "正在等待 Bridge 服务：http://127.0.0.1:$BridgePort ..." "Waiting for Bridge service: http://127.0.0.1:$BridgePort ...")
+  if (-not (Wait-Http "http://127.0.0.1:$BridgePort/api/health" 30 (T "Bridge 服务" "Bridge service"))) {
+    Write-Host (T "Bridge 启动失败，请查看：$BridgeErr" "Bridge failed to start. Check: $BridgeErr") -ForegroundColor Red
+    Fail (T "Bridge 服务没有在 30 秒内就绪。" "Bridge did not become ready within 30 seconds.")
   }
   if ($RequireCdp -and -not (Test-Cdp)) {
     Stop-BridgeServices
-    Fail "Bridge 已启动，但 Codex 控制通道离线。"
+    Fail (T "Bridge 已启动，但 Codex 控制通道离线。" "Bridge started, but the Codex control channel is offline.")
   }
 
   Write-Host ""
-  Write-Host "Codex 远程桥接已启动。" -ForegroundColor Green
-  Write-Host "电脑端页面：http://127.0.0.1:$BridgePort/"
+  Write-Host (T "Codex 远程桥接已启动。" "Codex remote bridge is running.") -ForegroundColor Green
+  Write-Host (T "电脑端页面：http://127.0.0.1:$BridgePort/" "Computer page: http://127.0.0.1:$BridgePort/")
   if ($HostAddress -ne "127.0.0.1") {
     foreach ($address in (Get-LanAddresses | Select-Object -Unique)) {
-      Write-Host "手机访问地址：http://$address`:$BridgePort/"
+      Write-Host (T "手机访问地址：http://$address`:$BridgePort/" "Phone URL: http://$address`:$BridgePort/")
     }
-    Write-Host "请在电脑端页面查看二维码，用手机扫描后连接。" -ForegroundColor Yellow
+    Write-Host (T "请在电脑端页面查看二维码，用手机扫描后连接。" "Open the computer page and scan its QR code with your phone.") -ForegroundColor Yellow
     Show-PairingInfo
   }
   Start-Process "http://127.0.0.1:$BridgePort/" | Out-Null
@@ -386,22 +412,22 @@ try {
     "build" { Build-Only }
     "cdp" { Ensure-Node; Ensure-Codex; Start-CodexControl }
     "lan" { Ensure-Node; Start-Bridge "0.0.0.0" $false }
-    "stop" { Stop-BridgeServices; Write-Host "Bridge 服务已停止。" }
+    "stop" { Stop-BridgeServices; Write-Host (T "Bridge 服务已停止。" "Bridge service stopped.") }
     "status" { Show-Status }
     "logs" { Show-Logs }
     "open" { Start-Process "http://127.0.0.1:$BridgePort/" | Out-Null }
     default {
-      Write-Host "用法：manage.bat [start|restart|stop|status|install|build|cdp|lan|logs|open]"
+      Write-Host (T "用法：manage.bat [start|restart|stop|status|install|build|cdp|lan|logs|open]" "Usage: manage.bat [start|restart|stop|status|install|build|cdp|lan|logs|open]")
       exit 2
     }
   }
   if ($interactive) {
     Write-Host ""
-    Write-Host "启动完成。请保持此窗口打开，以便查看运行状态。"
-    Read-Host "按 Enter 关闭"
+    Write-Host (T "启动完成。关闭此窗口后，服务仍会在后台运行。" "Startup complete. The service continues running after this window closes.")
+    Read-Host (T "请记下上方配对码，按 Enter 关闭窗口" "Note the pairing code above, then press Enter to close this window")
   }
 } catch {
   Write-Host ""
-  Write-Host "错误：$($_.Exception.Message)" -ForegroundColor Red
+  Write-Host (T "错误：$($_.Exception.Message)" "Error: $($_.Exception.Message)") -ForegroundColor Red
   exit 1
 }

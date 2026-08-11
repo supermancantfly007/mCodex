@@ -8,6 +8,7 @@ const INTERNAL_CONTEXT_PREFIXES = [
   "<permissions instructions>",
   "<skills_instructions>",
 ];
+const MAX_REASONING_TEXT_LENGTH = 4_000;
 
 export function parseJsonLine(line: string): JsonObject | null {
   try {
@@ -33,6 +34,21 @@ export function extractText(content: unknown): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+export function extractUserText(content: unknown): string {
+  const text = extractText(content);
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!normalized.trimStart().startsWith("# Files mentioned by the user:")) return text;
+
+  const requestHeading = /^\s*## My request for Codex:\s*$/m.exec(normalized);
+  if (!requestHeading) return text;
+  return normalized
+    .slice((requestHeading.index ?? 0) + requestHeading[0].length)
+    .split("\n")
+    .filter((line) => !/^\s*<\/?image(?:\s[^>]*)?>\s*$/i.test(line))
+    .join("\n")
+    .trim();
 }
 
 export function extractImages(content: unknown): Array<{ source: string; alt?: string }> {
@@ -113,6 +129,43 @@ export function statusFromEvent(eventType: string): ThreadStatus | undefined {
   return undefined;
 }
 
+export function rollbackTurnsFromRecord(record: JsonObject): number {
+  if (record.type !== "event_msg" || record.payload?.type !== "thread_rolled_back") return 0;
+  const turns = Number(record.payload.num_turns);
+  return Number.isSafeInteger(turns) && turns > 0 ? turns : 0;
+}
+
+export function rollbackTimelineItems(items: TimelineItem[], turns: number): TimelineItem[] {
+  let keepLength = items.length;
+  for (let turn = 0; turn < turns; turn += 1) {
+    let turnStart = -1;
+    for (let index = keepLength - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item?.kind === "message" && item.role === "user") {
+        turnStart = index;
+        break;
+      }
+    }
+    if (turnStart < 0) return [];
+    keepLength = turnStart;
+  }
+  return keepLength === items.length ? items : items.slice(0, keepLength);
+}
+
+export function timelineFromRecords(records: Array<{ record: JsonObject; offset: number }>, threadId: string): TimelineItem[] {
+  let items: TimelineItem[] = [];
+  for (const { record, offset } of records) {
+    const rollbackTurns = rollbackTurnsFromRecord(record);
+    if (rollbackTurns) {
+      items = rollbackTimelineItems(items, rollbackTurns);
+      continue;
+    }
+    const item = timelineFromRecord(record, threadId, offset);
+    if (item && isVisibleTimelineItem(item)) items.push(item);
+  }
+  return items;
+}
+
 export function timelineFromRecord(record: JsonObject, threadId: string, offset: number): TimelineItem | null {
   const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
   const payload = record.payload ?? {};
@@ -120,7 +173,7 @@ export function timelineFromRecord(record: JsonObject, threadId: string, offset:
 
   if (record.type === "response_item") {
     if (payload.type === "message") {
-      const text = extractText(payload.content).trim();
+      const text = (payload.role === "user" ? extractUserText(payload.content) : extractText(payload.content)).trim();
       const images = extractImages(payload.content);
       if (!text && !images.length) return null;
       if (payload.role !== "user" && payload.role !== "assistant") return null;
@@ -149,7 +202,10 @@ export function timelineFromRecord(record: JsonObject, threadId: string, offset:
       return { id, threadId, timestamp, kind: "status", role: "system", text: status, eventType };
     }
     if (eventType === "agent_reasoning") {
-      const text = String(payload.text ?? "").trim().replace(/^\*\*(.+)\*\*$/s, "$1");
+      const rawText = String(payload.text ?? "").trim().replace(/^\*\*(.+)\*\*$/s, "$1");
+      const text = rawText.length > MAX_REASONING_TEXT_LENGTH
+        ? `${rawText.slice(0, MAX_REASONING_TEXT_LENGTH - 1).trimEnd()}…`
+        : rawText;
       return text ? { id, threadId, timestamp, kind: "reasoning", role: "assistant", text, eventType } : null;
     }
   }

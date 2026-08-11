@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCodexPermissionMode, isFollowUpMode, permissionModeFromLabel } from "./controller.js";
+import { isCodexPermissionMode, isFollowUpMode, permissionModeFromLabel, selectCurrentStreamingText, selectRecentThreadIds, shouldUseAlternateFollowUpShortcut } from "./controller.js";
 
 describe("permissionModeFromLabel", () => {
   it.each([
@@ -32,5 +32,58 @@ describe("isFollowUpMode", () => {
     expect(["queue", "steer", "interrupt"].every(isFollowUpMode)).toBe(true);
     expect(isFollowUpMode("unknown")).toBe(false);
     expect(isFollowUpMode(null)).toBe(false);
+  });
+});
+
+describe("shouldUseAlternateFollowUpShortcut", () => {
+  it("uses Desktop's default steer behavior when no preference is stored", () => {
+    expect(shouldUseAlternateFollowUpShortcut(null, "steer")).toBe(false);
+    expect(shouldUseAlternateFollowUpShortcut(null, "queue")).toBe(true);
+  });
+
+  it("inverts a stored queue preference only for steer requests", () => {
+    expect(shouldUseAlternateFollowUpShortcut("queue", "queue")).toBe(false);
+    expect(shouldUseAlternateFollowUpShortcut("queue", "steer")).toBe(true);
+  });
+
+  it("treats Desktop's transient interrupt value as steer", () => {
+    expect(shouldUseAlternateFollowUpShortcut("interrupt", "steer")).toBe(false);
+    expect(shouldUseAlternateFollowUpShortcut("interrupt", "queue")).toBe(true);
+  });
+});
+
+describe("selectCurrentStreamingText", () => {
+  it("does not reuse the previous assistant response after a new user message", () => {
+    expect(selectCurrentStreamingText([
+      { identity: "assistant", content: "previous answer" },
+      { identity: "message-user", content: "hello" },
+    ])).toBe("");
+  });
+
+  it("returns assistant text written after the latest user message", () => {
+    expect(selectCurrentStreamingText([
+      { identity: "assistant", content: "previous answer" },
+      { identity: "message-user", content: "hello" },
+      { identity: "assistant", content: "new answer" },
+    ])).toBe("new answer");
+  });
+
+  it("stops at the latest user message when newer units have no output", () => {
+    expect(selectCurrentStreamingText([
+      { identity: "assistant", content: "previous answer" },
+      { identity: "message-user", content: "hello" },
+      { identity: "assistant-reasoning", content: "" },
+    ])).toBe("");
+  });
+});
+
+describe("selectRecentThreadIds", () => {
+  it("keeps only visible real threads without a Desktop folder assignment", () => {
+    expect(selectRecentThreadIds([
+      "local:assigned-thread",
+      "local:pure-chat",
+      "client-new-thread:temporary",
+      "local:pure-chat",
+    ], ["local:assigned-thread", "local:historical-thread"])).toEqual(["pure-chat"]);
   });
 });

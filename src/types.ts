@@ -49,4 +49,5 @@ export interface BridgeEvent {
   timestamp: string;
   item: TimelineItem | null;
   status?: ThreadStatus;
+  rollbackTurns?: number;
 }

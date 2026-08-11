@@ -3,9 +3,10 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import type { ApprovalRequest, ThreadSummary, TimelineItem } from "../types.js";
-import { extractImages, extractText, inferStatus, isVisibleTimelineItem, parseJsonLine, timelineFromRecord } from "./parser.js";
+import { extractImages, extractText, extractUserText, inferStatus, parseJsonLine, timelineFromRecords } from "./parser.js";
 
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+type ParsedRecord = { record: Record<string, any>; offset: number };
 
 async function walkJsonl(root: string): Promise<string[]> {
   const result: string[] = [];
@@ -26,8 +27,8 @@ async function walkJsonl(root: string): Promise<string[]> {
   return result;
 }
 
-async function readRecords(filePath: string): Promise<Array<{ record: Record<string, any>; offset: number }>> {
-  const records: Array<{ record: Record<string, any>; offset: number }> = [];
+async function readRecords(filePath: string): Promise<ParsedRecord[]> {
+  const records: ParsedRecord[] = [];
   const stream = createReadStream(filePath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let offset = 0;
@@ -37,6 +38,31 @@ async function readRecords(filePath: string): Promise<Array<{ record: Record<str
     offset += Buffer.byteLength(line, "utf8") + 1;
   }
   return records;
+}
+
+function approvalRequestsFromRecords(records: ParsedRecord[], threadId: string): ApprovalRequest[] {
+  const pending: ApprovalRequest[] = [];
+  for (const { record, offset } of records) {
+    const payload = record.payload ?? {};
+    const eventType = String(payload.type ?? record.type ?? "");
+    if (!/approval|permission|authorization|consent/i.test(eventType)) continue;
+    const serialized = JSON.stringify(payload);
+    if (!/request|pending|needed|waiting/i.test(eventType) && !/pending|needs approval|permission required/i.test(serialized)) continue;
+    const id = String(payload.id ?? payload.request_id ?? payload.call_id ?? `${threadId}:${offset}`);
+    if (pending.some((item) => item.id === id)) continue;
+    const detailValue = payload.detail ?? payload.reason ?? payload.command ?? payload.input;
+    const detail = typeof detailValue === "string" ? detailValue : detailValue ? JSON.stringify(detailValue, null, 2) : "";
+    pending.push({
+      id,
+      threadId,
+      kind: /permission/i.test(eventType) ? "permission" : "approval",
+      title: String(payload.title ?? payload.name ?? (payload.kind ? `${payload.kind} approval` : "需要审批")),
+      detail,
+      createdAt: typeof record.timestamp === "string" ? record.timestamp : null,
+      source: "session",
+    });
+  }
+  return pending.slice(-10);
 }
 
 async function readHeadTailRecords(filePath: string): Promise<Array<{ record: Record<string, any>; offset: number }>> {
@@ -69,6 +95,7 @@ export class SessionStore {
   private readonly archivedRoot: string;
   private readonly indexPath: string;
   private filesById = new Map<string, string>();
+  private titlesById = new Map<string, string>();
 
   constructor(private readonly codexHome: string) {
     this.sessionsRoot = path.join(codexHome, "sessions");
@@ -106,7 +133,7 @@ export class SessionStore {
         .filter(Boolean);
       const firstUser = messages.find((message) => message.role === "user");
       const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-      const titleCandidate = extractText(firstUser?.content).trim();
+      const titleCandidate = extractUserText(firstUser?.content).trim();
       const preview = extractText(lastAssistant?.content).trim();
       return {
         id,
@@ -120,7 +147,15 @@ export class SessionStore {
         preview: preview.slice(0, 180),
       } satisfies ThreadSummary;
     }));
-    return summaries.filter((value): value is ThreadSummary => value !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const threads = summaries.filter((value): value is ThreadSummary => value !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    for (const thread of threads) this.titlesById.set(thread.id, thread.title);
+    return threads;
+  }
+
+  async getThreadTitle(threadId: string): Promise<string | null> {
+    const cached = this.titlesById.get(threadId);
+    if (cached) return cached;
+    return (await this.listThreads()).find((thread) => thread.id === threadId)?.title ?? null;
   }
 
   async getThreadFile(threadId: string): Promise<string | null> {
@@ -133,10 +168,17 @@ export class SessionStore {
     const filePath = await this.getThreadFile(threadId);
     if (!filePath) return [];
     const records = await readRecords(filePath);
-    return records
-      .map(({ record, offset }) => timelineFromRecord(record, threadId, offset))
-      .filter((item): item is TimelineItem => item !== null)
-      .filter(isVisibleTimelineItem);
+    return timelineFromRecords(records, threadId);
+  }
+
+  async getTimelineWithApprovals(threadId: string): Promise<{ items: TimelineItem[]; approvals: ApprovalRequest[] }> {
+    const filePath = await this.getThreadFile(threadId);
+    if (!filePath) return { items: [], approvals: [] };
+    const records = await readRecords(filePath);
+    return {
+      items: timelineFromRecords(records, threadId),
+      approvals: approvalRequestsFromRecords(records, threadId),
+    };
   }
 
   async containsImageReference(threadId: string, source: string): Promise<boolean> {
@@ -153,7 +195,7 @@ export class SessionStore {
       if (record.type !== "response_item" || record.payload?.type !== "message" || record.payload?.role !== "user") return false;
       const timestamp = Date.parse(record.timestamp ?? "");
       if (timestamp < sinceMs - 2000) return false;
-      const actualText = normalizeText(extractText(record.payload.content));
+      const actualText = normalizeText(extractUserText(record.payload.content));
       const expectedText = normalizeText(content);
       const hasImage = extractImages(record.payload.content).length > 0;
       if (expectsImage) {
@@ -170,28 +212,7 @@ export class SessionStore {
     const filePath = await this.getThreadFile(threadId);
     if (!filePath) return [];
     const records = await readRecords(filePath);
-    const pending: ApprovalRequest[] = [];
-    for (const { record, offset } of records) {
-      const payload = record.payload ?? {};
-      const eventType = String(payload.type ?? record.type ?? "");
-      if (!/approval|permission|authorization|consent/i.test(eventType)) continue;
-      const serialized = JSON.stringify(payload);
-      if (!/request|pending|needed|waiting/i.test(eventType) && !/pending|needs approval|permission required/i.test(serialized)) continue;
-      const id = String(payload.id ?? payload.request_id ?? payload.call_id ?? `${threadId}:${offset}`);
-      if (pending.some((item) => item.id === id)) continue;
-      const detailValue = payload.detail ?? payload.reason ?? payload.command ?? payload.input;
-      const detail = typeof detailValue === "string" ? detailValue : detailValue ? JSON.stringify(detailValue, null, 2) : "";
-      pending.push({
-        id,
-        threadId,
-        kind: /permission/i.test(eventType) ? "permission" : "approval",
-        title: String(payload.title ?? payload.name ?? (payload.kind ? `${payload.kind} approval` : "需要审批")),
-        detail,
-        createdAt: typeof record.timestamp === "string" ? record.timestamp : null,
-        source: "session",
-      });
-    }
-    return pending.slice(-10);
+    return approvalRequestsFromRecords(records, threadId);
   }
 }
 

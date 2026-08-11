@@ -123,7 +123,7 @@ mCodex $Version - Windows 便携版
 
 1. 第一次启动前，请完全退出 Codex Desktop。
 2. 双击 start.bat。
-3. 请保持启动窗口打开，以便查看运行状态。
+3. 启动窗口会显示配对码；关闭窗口后，服务仍会在后台运行。
 4. 电脑端页面会显示二维码，请用手机扫描使用。
 
 此版本已内置 Node.js，不需要执行 npm install 或 npm run build。

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { open, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { BridgeEvent } from "../types.js";
-import { isVisibleTimelineItem, parseJsonLine, statusFromEvent, timelineFromRecord } from "./parser.js";
+import { isVisibleTimelineItem, parseJsonLine, rollbackTurnsFromRecord, statusFromEvent, timelineFromRecord } from "./parser.js";
 
 interface Cursor { offset: number; pending: string }
 
@@ -93,13 +93,15 @@ export class SessionWatcher extends EventEmitter {
           const item = parsedItem && isVisibleTimelineItem(parsedItem) ? parsedItem : null;
           const eventType = record.type === "event_msg" ? String(record.payload?.type ?? "") : "";
           const status = statusFromEvent(eventType);
-          if (item || status) {
+          const rollbackTurns = rollbackTurnsFromRecord(record);
+          if (item || status || rollbackTurns) {
             const event: BridgeEvent = {
               id: `${filenameId}:${logicalOffset}`,
               threadId: filenameId,
               timestamp: typeof record.timestamp === "string" ? record.timestamp : new Date().toISOString(),
               item,
               status,
+              rollbackTurns: rollbackTurns || undefined,
             };
             this.emit("event", event);
           }

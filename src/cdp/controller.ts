@@ -20,6 +20,11 @@ export interface StreamingOutput {
   text: string;
 }
 
+export interface StreamingCandidate {
+  identity: string;
+  content: string;
+}
+
 export type CodexPermissionMode = "ask" | "auto" | "full-access";
 
 export type FollowUpMode = "queue" | "steer" | "interrupt";
@@ -59,11 +64,40 @@ export function isFollowUpMode(value: unknown): value is FollowUpMode {
   return value === "queue" || value === "steer" || value === "interrupt";
 }
 
+export function shouldUseAlternateFollowUpShortcut(configuredMode: unknown, requestedMode: "queue" | "steer"): boolean {
+  // Desktop treats a missing (or legacy "interrupt") preference as "steer".
+  const activeMode = configuredMode === "queue" ? "queue" : "steer";
+  return activeMode !== requestedMode;
+}
+
+export function selectCurrentStreamingText(candidates: StreamingCandidate[]): string {
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = candidates[index];
+    if (!candidate) continue;
+    if (/(?:^|[-_: ])(?:user|you)(?:$|[-_: ])/i.test(candidate.identity)) return "";
+    const content = candidate.content.trim();
+    if (content) return content;
+  }
+  return "";
+}
+
 export interface CodexProject {
   id: string;
   name: string;
   rootPaths: string[];
   threadIds: string[];
+}
+
+export interface CodexProjectCatalog {
+  projects: CodexProject[];
+  recentThreadIds: string[];
+}
+
+export function selectRecentThreadIds(sidebarThreadIds: string[], assignedThreadIds: string[]): string[] {
+  const assigned = new Set(assignedThreadIds.map((threadId) => threadId.replace(/^local:/, "")));
+  return [...new Set(sidebarThreadIds
+    .map((threadId) => threadId.replace(/^local:/, ""))
+    .filter((threadId) => threadId && !threadId.startsWith("client-new-thread:") && !assigned.has(threadId)))];
 }
 
 interface ThreadProjectAssignment {
@@ -114,6 +148,8 @@ export class CodexCdpController {
   private browser: Browser | null = null;
   private controlChain: Promise<unknown> = Promise.resolve();
   private readonly receipts = new Map<string, MessageReceipt>();
+  private statusSnapshot: { value: CdpStatus; capturedAt: number } | null = null;
+  private statusInFlight: Promise<CdpStatus> | null = null;
 
   constructor(private readonly endpoint: string, private readonly sessions: SessionStore) {}
 
@@ -143,18 +179,38 @@ export class CodexCdpController {
   }
 
   async status(): Promise<CdpStatus> {
+    if (this.statusSnapshot && Date.now() - this.statusSnapshot.capturedAt < 400) return this.statusSnapshot.value;
+    if (this.statusInFlight) return this.statusInFlight;
+    this.statusInFlight = this.readStatus();
+    try {
+      const value = await this.statusInFlight;
+      this.statusSnapshot = { value, capturedAt: Date.now() };
+      return value;
+    } finally {
+      this.statusInFlight = null;
+    }
+  }
+
+  private async readStatus(): Promise<CdpStatus> {
     try {
       const page = await this.mainPage();
-      const currentThreadId = await this.currentThreadId(page);
-      const stopReady = await this.stopButton(page).count() > 0;
-      const runningRows = await page.evaluate(() => Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"))
-        .map((row) => ({
-          id: (row.getAttribute("data-app-action-sidebar-thread-id") ?? "").replace(/^local:/, ""),
-          spinning: Boolean(row.querySelector(".animate-spin")),
-          title: (row.textContent ?? "").replace(/\s+/g, " ").trim(),
-        }))
-        .filter((row) => row.id && row.spinning));
-      const threads = await this.sessions.listThreads();
+      const [currentThreadId, stopReady, runningRows, editorReady, approval, permissions] = await Promise.all([
+        this.currentThreadId(page),
+        this.stopButton(page).count().then((count) => count > 0),
+        page.evaluate(() => Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"))
+          .map((row) => ({
+            id: (row.getAttribute("data-app-action-sidebar-thread-id") ?? "").replace(/^local:/, ""),
+            spinning: Boolean(row.querySelector(".animate-spin")),
+            title: (row.textContent ?? "").replace(/\s+/g, " ").trim(),
+          }))
+          .filter((row) => row.id && row.spinning)),
+        page.locator('[contenteditable="true"][role="textbox"]').count().then((count) => count === 1),
+        this.detectDesktopApproval(page),
+        this.permissionStateFromPage(page),
+      ]);
+      const threads = runningRows.some((row) => row.id.startsWith("client-new-thread:"))
+        ? await this.sessions.listThreads()
+        : [];
       const runningThreadIds = resolveRunningThreadIds(runningRows, threads, currentThreadId);
       if ((stopReady || runningRows.length > 0) && currentThreadId && !currentThreadId.startsWith("client-new-thread:") && !runningThreadIds.includes(currentThreadId)) {
         // Desktop may keep a temporary client-new-thread id in the sidebar while the composer already points at the real thread.
@@ -165,10 +221,10 @@ export class CodexCdpController {
         connected: true,
         currentThreadId: currentThreadId && !currentThreadId.startsWith("client-new-thread:") ? currentThreadId : (runningThreadIds[0] ?? currentThreadId),
         runningThreadIds: [...new Set(runningThreadIds)],
-        editorReady: await page.locator('[contenteditable="true"][role="textbox"]').count() === 1,
+        editorReady,
         stopReady,
-        approval: await this.detectDesktopApproval(page),
-        permissions: await this.permissionStateFromPage(page),
+        approval,
+        permissions,
       };
     } catch (error) {
       return {
@@ -189,27 +245,26 @@ export class CodexCdpController {
       const page = await this.mainPage();
       const threadId = await this.currentThreadId(page);
       if (!threadId || threadId.startsWith("client-new-thread:") || await this.stopButton(page).count() === 0) return null;
-      const text = await page.evaluate(() => {
-        const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-content-search-unit-key]"));
-        for (let index = nodes.length - 1; index >= 0; index -= 1) {
-          const node = nodes[index];
-          if (!node || node.getClientRects().length === 0) continue;
-          const roleNode = node.closest<HTMLElement>("[data-message-author-role], [data-message-role], [data-role]")
-            ?? node.querySelector<HTMLElement>("[data-message-author-role], [data-message-role], [data-role]");
-          const identity = [
-            node.getAttribute("data-content-search-unit-key"),
-            roleNode?.getAttribute("data-message-author-role"),
-            roleNode?.getAttribute("data-message-role"),
-            roleNode?.getAttribute("data-role"),
-            roleNode?.getAttribute("aria-label"),
-          ].filter(Boolean).join(" ");
-          if (/(?:^|[-_: ])(?:user|you)(?:$|[-_: ])/i.test(identity)) continue;
-          const markdown = node.matches('[class*="markdown"]') ? node : node.querySelector<HTMLElement>('[class*="markdown"]');
-          const content = (markdown?.innerText ?? "").trim();
-          if (content) return content;
-        }
-        return "";
+      const candidates = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll<HTMLElement>("[data-content-search-unit-key]"))
+          .filter((node) => node.getClientRects().length > 0)
+          .map((node) => {
+            const roleNode = node.closest<HTMLElement>("[data-message-author-role], [data-message-role], [data-role]")
+              ?? node.querySelector<HTMLElement>("[data-message-author-role], [data-message-role], [data-role]");
+            const markdown = node.matches('[class*="markdown"]') ? node : node.querySelector<HTMLElement>('[class*="markdown"]');
+            return {
+              identity: [
+                node.getAttribute("data-content-search-unit-key"),
+                roleNode?.getAttribute("data-message-author-role"),
+                roleNode?.getAttribute("data-message-role"),
+                roleNode?.getAttribute("data-role"),
+                roleNode?.getAttribute("aria-label"),
+              ].filter(Boolean).join(" "),
+              content: markdown?.innerText ?? "",
+            };
+          });
       });
+      const text = selectCurrentStreamingText(candidates);
       return text ? { threadId, text } : null;
     } catch {
       return null;
@@ -226,38 +281,44 @@ export class CodexCdpController {
 
   private async ensureThread(page: Page, threadId: string): Promise<void> {
     if (await this.currentThreadId(page) === threadId) return;
+    const startedAt = Date.now();
+    const remaining = () => Math.max(1, 6_000 - (Date.now() - startedAt));
+    const waitForTarget = (timeout: number) => this.waitForCurrentThread(page, threadId, Math.min(timeout, remaining()));
 
     const row = page.locator(`[data-app-action-sidebar-thread-id="local:${threadId}"]:visible`);
     if (await row.count() === 1) {
       try {
-        await row.click({ timeout: 2_000 });
-        await this.waitForCurrentThread(page, threadId, 5_000);
+        await row.evaluate((element: HTMLElement) => element.click(), undefined, { timeout: Math.min(1_000, remaining()) });
+        await waitForTarget(1_500);
         return;
       } catch {
         // The sidebar can collapse while a task is being selected; fall through to search.
       }
     }
+    if (await this.currentThreadId(page) === threadId) return;
 
-    const summary = (await this.sessions.listThreads()).find((thread) => thread.id === threadId);
+    const title = await this.sessions.getThreadTitle(threadId);
     const searchButton = page.locator('button[aria-label="搜索"]:visible, button[aria-label="Search"]:visible');
-    if (summary && await searchButton.count() === 1) {
+    if (title && await searchButton.count() === 1 && remaining() > 1) {
       try {
-        await searchButton.click({ timeout: 2_000 });
+        await searchButton.evaluate((element: HTMLElement) => element.click(), undefined, { timeout: Math.min(1_000, remaining()) });
         const searchInput = page.locator('input[cmdk-input][placeholder="搜索任务"], input[cmdk-input][placeholder*="Search" i]');
-        await searchInput.waitFor({ state: "visible", timeout: 2_000 });
-        await searchInput.fill(summary.title);
+        await searchInput.waitFor({ state: "visible", timeout: Math.min(1_000, remaining()) });
+        await searchInput.fill(title, { timeout: Math.min(1_000, remaining()) });
         const result = page.locator(`[cmdk-item][data-value="command-menu-quick-chat-result:local:${threadId}"]`);
-        await result.waitFor({ state: "visible", timeout: 3_000 });
-        await result.click({ timeout: 2_000 });
-        await this.waitForCurrentThread(page, threadId, 5_000);
+        await result.waitFor({ state: "visible", timeout: Math.min(1_500, remaining()) });
+        await result.evaluate((element: HTMLElement) => element.click(), undefined, { timeout: Math.min(1_000, remaining()) });
+        await waitForTarget(2_500);
         return;
       } catch {
         await page.keyboard.press("Escape").catch(() => undefined);
       }
     }
+    if (await this.currentThreadId(page) === threadId) return;
 
+    if (remaining() <= 1) throw new Error("Codex task navigation timed out");
     this.openDeepLink(threadId);
-    await this.waitForCurrentThread(page, threadId, 8_000);
+    await waitForTarget(3_000);
   }
 
   private async waitForCurrentThread(page: Page, threadId: string, timeout = 8_000): Promise<void> {
@@ -382,11 +443,15 @@ export class CodexCdpController {
     });
   }
 
-  private async projectsFromPage(page: Page): Promise<CodexProject[]> {
-    const [projects, order, assignments] = await Promise.all([
+  private async projectCatalogFromPage(page: Page): Promise<CodexProjectCatalog> {
+    const [projects, order, assignments, sidebarThreadIds] = await Promise.all([
       this.getGlobalState<Record<string, Omit<CodexProject, "threadIds">>>(page, "local-projects"),
       this.getGlobalState<string[]>(page, "project-order"),
       this.getGlobalState<Record<string, ThreadProjectAssignment>>(page, "thread-project-assignments"),
+      page.evaluate(() => Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"))
+        .filter((row) => row.getClientRects().length > 0)
+        .map((row) => row.getAttribute("data-app-action-sidebar-thread-id") ?? "")
+        .filter(Boolean)),
     ]);
     const orderIndex = new Map((order ?? []).map((projectId, index) => [projectId, index]));
     const threadIdsByProject = new Map<string, string[]>();
@@ -397,7 +462,7 @@ export class CodexCdpController {
       threadIdsByProject.set(assignment.projectId, threadIds);
     }
 
-    return Object.values(projects ?? {})
+    const projectList = Object.values(projects ?? {})
       .filter((project) => project && typeof project.id === "string" && typeof project.name === "string" && Array.isArray(project.rootPaths))
       .map((project) => ({ ...project, threadIds: threadIdsByProject.get(project.id) ?? [] }))
       .sort((left, right) => {
@@ -405,6 +470,14 @@ export class CodexCdpController {
         const rightIndex = orderIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER;
         return leftIndex - rightIndex || left.name.localeCompare(right.name, "zh-CN");
       });
+    return {
+      projects: projectList,
+      recentThreadIds: selectRecentThreadIds(sidebarThreadIds, Object.keys(assignments ?? {})),
+    };
+  }
+
+  private async projectsFromPage(page: Page): Promise<CodexProject[]> {
+    return (await this.projectCatalogFromPage(page)).projects;
   }
 
   async openThread(threadId: string): Promise<{ threadId: string; openedAt: string }> {
@@ -415,8 +488,8 @@ export class CodexCdpController {
     });
   }
 
-  async listProjects(): Promise<CodexProject[]> {
-    return this.projectsFromPage(await this.mainPage());
+  async listProjects(): Promise<CodexProjectCatalog> {
+    return this.projectCatalogFromPage(await this.mainPage());
   }
 
   async createProject(name: string, rootPath: string): Promise<CodexProject & { duplicate: boolean }> {
@@ -596,7 +669,7 @@ export class CodexCdpController {
     }, payload);
   }
 
-  private async submitComposerMessage(page: Page, content: string, images: CodexImageInput[]): Promise<void> {
+  private async submitComposerMessage(page: Page, content: string, images: CodexImageInput[], alternateFollowUpMode = false): Promise<void> {
     const editor = page.locator('[contenteditable="true"][role="textbox"]').first();
     if (await editor.count() !== 1) throw new Error("A unique Codex composer was not found");
     await this.attachImages(page, images);
@@ -605,12 +678,17 @@ export class CodexCdpController {
       await editor.fill("");
       throw new Error("Composer content did not match the requested message");
     }
-    const action = this.composerSubmitButton(page).or(page.locator(".composer-surface-chrome button.size-token-button-composer")).first();
-    if (await action.count() !== 1 || await action.isDisabled()) {
-      await editor.fill("");
-      throw new Error("Codex send control is unavailable");
+    if (alternateFollowUpMode) {
+      // Desktop uses this shortcut to invert queue/steer for one running turn.
+      await editor.press(process.platform === "darwin" ? "Meta+Shift+Enter" : "Control+Shift+Enter");
+    } else {
+      const action = this.composerSubmitButton(page).or(page.locator(".composer-surface-chrome button.size-token-button-composer")).first();
+      if (await action.count() !== 1 || await action.isDisabled()) {
+        await editor.fill("");
+        throw new Error("Codex send control is unavailable");
+      }
+      await action.click();
     }
-    await action.click();
     await page.waitForFunction(() => (document.querySelector('[contenteditable="true"][role="textbox"]')?.textContent ?? "").trim() === "", undefined, { timeout: 5_000 });
   }
 
@@ -732,8 +810,8 @@ export class CodexCdpController {
       const runtime = await this.status();
       if (!runtime.runningThreadIds.includes(threadId)) throw new Error("This task is no longer running; send it as a regular message");
 
-      // Use the visible composer so this remains compatible with Desktop builds
-      // whose Electron follow-up IPC handler is missing or stale.
+      // Use Desktop's visible composer and its one-shot queue/steer shortcut so
+      // image attachments and the app's native follow-up behavior stay aligned.
       const sentAt = Date.now();
       if (mode === "interrupt") {
         const stop = this.stopButton(page);
@@ -742,24 +820,14 @@ export class CodexCdpController {
         await this.waitForThreadStatus(threadId, ["interrupted", "completed", "error"], 10_000);
         await this.submitComposerMessage(page, content, images);
       } else {
-        const previousMode = await this.getGlobalState<FollowUpMode>(page, "followUpQueueMode");
-        if (previousMode !== mode) await this.setGlobalState(page, "followUpQueueMode", mode);
-        try {
-          await this.submitComposerMessage(page, content, images);
-        } finally {
-          if (previousMode !== mode) await this.setGlobalState(page, "followUpQueueMode", previousMode).catch(() => undefined);
-        }
+        const configuredMode = await this.getGlobalState<FollowUpMode>(page, "followUpQueueMode");
+        await this.submitComposerMessage(page, content, images, shouldUseAlternateFollowUpShortcut(configuredMode, mode));
       }
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline) {
-        if (await this.sessions.containsUserMessage(threadId, content, sentAt, images.length > 0)) {
-          const receipt = { threadId, acceptedAt: new Date().toISOString(), confirmed: true };
-          this.receipts.set(clientMessageId, receipt);
-          return { ...receipt, mode, duplicate: false };
-        }
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-      const receipt = { threadId, acceptedAt: new Date().toISOString(), confirmed: false };
+      // Queue messages are not written to JSONL until the running turn ends.
+      // The cleared Desktop composer is the acceptance signal; do one best-effort
+      // receipt check without holding the mobile request open.
+      const confirmed = await this.sessions.containsUserMessage(threadId, content, sentAt, images.length > 0);
+      const receipt = { threadId, acceptedAt: new Date().toISOString(), confirmed };
       this.receipts.set(clientMessageId, receipt);
       return { ...receipt, mode, duplicate: false };
     });

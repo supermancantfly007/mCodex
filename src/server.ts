@@ -3,17 +3,21 @@ import { stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import compression from "compression";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import { config } from "./config.js";
 import { listDirectories, listRoots } from "./fs/folder-picker.js";
 import { CodexCdpController, isCodexPermissionMode, isFollowUpMode, type CodexImageInput, type CodexPermissionMode, type FollowUpMode } from "./cdp/controller.js";
 import { SessionStore } from "./sessions/store.js";
 import { SessionWatcher } from "./sessions/watcher.js";
 import { reconcileRuntimeStatuses } from "./runtime-status.js";
-import type { BridgeEvent } from "./types.js";
+import type { BridgeEvent, TimelineItem } from "./types.js";
 
 class BadRequestError extends Error {}
+
+const serverLocale = /^en(?:-|$)/i.test(process.env.MCODEX_LOCALE ?? "") || (!process.env.MCODEX_LOCALE && /^en(?:-|$)/i.test(Intl.DateTimeFormat().resolvedOptions().locale)) ? "en-US" : "zh-CN";
+const serverText = (chinese: string, english: string): string => serverLocale === "en-US" ? english : chinese;
 
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
@@ -23,6 +27,20 @@ export function isLoopbackAddress(address: string | undefined): boolean {
 
 export function mayUseQueryToken(method: string, requestPath: string): boolean {
   return method.toUpperCase() === "GET" && requestPath === "/media";
+}
+
+export function deferInlineTimelineImages(items: TimelineItem[]): TimelineItem[] {
+  return items.map((item) => {
+    if (!item.images?.some((image) => image.source.startsWith("data:"))) return item;
+    return {
+      ...item,
+      images: item.images.map((image, imageIndex) => {
+        if (!image.source.startsWith("data:")) return image;
+        const query = new URLSearchParams({ threadId: item.threadId, itemId: item.id, imageIndex: String(imageIndex) });
+        return { ...image, source: `/api/media?${query}` };
+      }),
+    };
+  });
 }
 
 function tokenMatches(candidate: string): boolean {
@@ -69,6 +87,7 @@ export async function createBridge() {
   const cdp = new CodexCdpController(config.cdpUrl, sessions);
   const app = express();
   app.disable("x-powered-by");
+  app.use(compression({ threshold: 1_024 }));
   // Four 10 MB images expand to roughly 53.4 MB when encoded as Base64.
   app.use(express.json({ limit: "60mb" }));
   app.get("/api/health", (_req, res) => res.json({ ok: true, authRequired: Boolean(config.token), pairingAvailable: Boolean(config.external && Date.now() < pairingExpiresAt) }));
@@ -122,19 +141,33 @@ export async function createBridge() {
   app.get("/api/threads", async (_req, res, next) => {
     try {
       const [threads, runtime] = await Promise.all([sessions.listThreads(), cdp.status()]);
-      res.json({ threads: reconcileRuntimeStatuses(threads, runtime) });
+      res.json({ threads: reconcileRuntimeStatuses(threads, runtime), cdp: runtime });
     } catch (error) { next(error); }
   });
   app.get("/api/threads/:id/timeline", async (req, res, next) => {
     try {
       const file = await sessions.getThreadFile(req.params.id);
       if (!file) return void res.status(404).json({ error: "Thread not found" });
-      res.json({ items: await sessions.getTimeline(req.params.id), approvals: await sessions.getApprovalRequests(req.params.id) });
+      const timeline = await sessions.getTimelineWithApprovals(req.params.id);
+      res.json({ ...timeline, items: deferInlineTimelineImages(timeline.items) });
     } catch (error) { next(error); }
   });
   app.get("/api/media", async (req, res, next) => {
     try {
       const threadId = typeof req.query.threadId === "string" ? req.query.threadId.trim() : "";
+      const itemId = typeof req.query.itemId === "string" ? req.query.itemId.trim() : "";
+      const imageIndex = typeof req.query.imageIndex === "string" ? Number(req.query.imageIndex) : -1;
+      if (threadId && itemId && Number.isSafeInteger(imageIndex) && imageIndex >= 0) {
+        const item = (await sessions.getTimeline(threadId)).find((candidate) => candidate.id === itemId);
+        const source = item?.images?.[imageIndex]?.source ?? "";
+        const match = /^data:(image\/(?:avif|gif|jpeg|png|webp));base64,([a-zA-Z0-9+/]*={0,2})$/.exec(source);
+        if (!match) return void res.status(404).json({ error: "Image not found" });
+        const buffer = Buffer.from(match[2], "base64");
+        if (!buffer.length || buffer.length > 20 * 1024 * 1024) return void res.status(404).json({ error: "Image not found" });
+        res.setHeader("Cache-Control", "private, max-age=3600");
+        res.type(match[1]).send(buffer);
+        return;
+      }
       const requested = typeof req.query.path === "string" ? req.query.path.trim() : "";
       const mediaPath = requested.startsWith("file:") ? fileURLToPath(requested) : requested;
       if (!threadId || !await sessions.containsImageReference(threadId, requested)) {
@@ -193,7 +226,7 @@ export async function createBridge() {
     } catch (error) { next(error); }
   });
   app.get("/api/projects", async (_req, res, next) => {
-    try { res.json({ projects: await cdp.listProjects() }); } catch (error) { next(error); }
+    try { res.json(await cdp.listProjects()); } catch (error) { next(error); }
   });
   app.post("/api/projects", async (req, res, next) => {
     try {
@@ -246,11 +279,29 @@ export async function createBridge() {
 
   const server = app.listen(config.port, config.host);
   const wss = new WebSocketServer({ noServer: true });
+  const websocketLiveness = new WeakMap<WebSocket, boolean>();
   wss.on("connection", (ws) => {
+    websocketLiveness.set(ws, true);
+    ws.on("pong", () => websocketLiveness.set(ws, true));
     ws.on("error", (error) => {
       console.error("WebSocket client error:", error instanceof Error ? error.message : String(error));
     });
+    void cdp.status().then((status) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "desktop_state", status }));
+    });
   });
+  const websocketHeartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.readyState !== client.OPEN) continue;
+      if (websocketLiveness.get(client) === false) {
+        client.terminate();
+        continue;
+      }
+      websocketLiveness.set(client, false);
+      try { client.ping(); } catch { client.terminate(); }
+    }
+  }, 25_000);
+  websocketHeartbeat.unref();
   const broadcast = (payload: unknown) => {
     const data = JSON.stringify(payload);
     for (const client of wss.clients) {
@@ -306,8 +357,8 @@ export async function createBridge() {
   streamPoll.unref();
   await watcher.start();
   if (config.external) {
-    console.log(`手机配对码（有效期 10 分钟）：${pairingCode}`);
-    if (config.tokenGenerated) console.log(`Bridge 访问令牌：${config.token}`);
+    console.log(serverText(`手机配对码（有效期 10 分钟）：${pairingCode}`, `Phone pairing code (valid for 10 minutes): ${pairingCode}`));
+    if (config.tokenGenerated) console.log(serverText(`Bridge 访问令牌：${config.token}`, `Bridge access token: ${config.token}`));
   }
 
   return {
@@ -316,6 +367,7 @@ export async function createBridge() {
     close: async () => {
       clearInterval(desktopPoll);
       clearInterval(streamPoll);
+      clearInterval(websocketHeartbeat);
       watcher.stop();
       for (const client of wss.clients) client.close();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

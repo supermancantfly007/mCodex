@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractImages, extractText, inferStatus, isVisibleTimelineItem, statusFromEvent, timelineFromRecord } from "./parser.js";
+import { extractImages, extractText, extractUserText, inferStatus, isVisibleTimelineItem, rollbackTurnsFromRecord, statusFromEvent, timelineFromRecord, timelineFromRecords } from "./parser.js";
 import { normalizeText } from "./store.js";
 
 describe("session parser", () => {
@@ -18,6 +18,27 @@ describe("session parser", () => {
     ]);
     expect(timelineFromRecord({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_image", image_url: { url: "https://example.com/a.png" } }] } }, "thread", 2))
       .toMatchObject({ kind: "message", role: "user", text: "", images: [{ source: "https://example.com/a.png" }] });
+  });
+
+  it("hides Desktop attachment metadata from user messages", () => {
+    const content = [
+      {
+        type: "input_text",
+        text: "\n# Files mentioned by the user:\n\n## clipboard.png: C:/Users/name/AppData/Local/Temp/clipboard.png\n\n## My request for Codex:\n只显示这段正文\n",
+      },
+      { type: "input_text", text: '<image name=[Image #1] path="C:\\Temp\\clipboard.png">' },
+      { type: "input_image", image_url: "data:image/png;base64,abc" },
+      { type: "input_text", text: "</image>" },
+    ];
+
+    expect(extractUserText(content)).toBe("只显示这段正文");
+    expect(timelineFromRecord({ type: "response_item", payload: { type: "message", role: "user", content } }, "thread", 3))
+      .toMatchObject({ text: "只显示这段正文", images: [{ source: "data:image/png;base64,abc" }] });
+  });
+
+  it("does not rewrite ordinary user Markdown", () => {
+    const text = "## My request for Codex:\n这是用户主动输入的标题";
+    expect(extractUserText([{ type: "input_text", text }])).toBe(text);
   });
 
   it("maps tool calls and lifecycle state", () => {
@@ -46,6 +67,12 @@ describe("session parser", () => {
     const item = timelineFromRecord({ type: "event_msg", payload: { type: "agent_reasoning", text: "**Planning concurrent work**" } }, "thread", 14);
     expect(item).toMatchObject({ kind: "reasoning", text: "Planning concurrent work" });
     expect(item && isVisibleTimelineItem(item)).toBe(true);
+  });
+
+  it("caps anomalously large reasoning events for remote timelines", () => {
+    const item = timelineFromRecord({ type: "event_msg", payload: { type: "agent_reasoning", text: "x".repeat(10_000) } }, "thread", 15);
+    expect(item?.text).toHaveLength(4_000);
+    expect(item?.text.endsWith("…")).toBe(true);
   });
 
   it("reads successful file changes from the structured completion event", () => {
@@ -93,5 +120,29 @@ describe("session parser", () => {
   it("hides injected desktop context messages", () => {
     const item = timelineFromRecord({ type: "response_item", payload: { type: "message", role: "user", content: [{ text: "<environment_context>internal</environment_context>" }] } }, "thread", 12);
     expect(item).toBeNull();
+  });
+
+  it("removes rolled-back turns before building the visible timeline", () => {
+    const records = [
+      { offset: 0, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "first prompt" }] } } },
+      { offset: 10, record: { type: "response_item", payload: { type: "message", role: "assistant", content: [{ text: "obsolete answer" }] } } },
+      { offset: 20, record: { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } } },
+      { offset: 30, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "replacement prompt" }] } } },
+    ];
+
+    expect(rollbackTurnsFromRecord(records[2].record)).toBe(1);
+    expect(timelineFromRecords(records, "thread").map((item) => item.text)).toEqual(["replacement prompt"]);
+  });
+
+  it("can roll back more than one completed turn", () => {
+    const records = [
+      { offset: 0, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "one" }] } } },
+      { offset: 10, record: { type: "response_item", payload: { type: "message", role: "assistant", content: [{ text: "answer one" }] } } },
+      { offset: 20, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "two" }] } } },
+      { offset: 30, record: { type: "response_item", payload: { type: "message", role: "assistant", content: [{ text: "answer two" }] } } },
+      { offset: 40, record: { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 2 } } },
+    ];
+
+    expect(timelineFromRecords(records, "thread")).toEqual([]);
   });
 });
