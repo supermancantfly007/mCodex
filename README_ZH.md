@@ -7,7 +7,7 @@
 面向 Windows 10/11 的本地 Web 控制界面。Codex Desktop 留在电脑上，
 你可以从手机查看进度、补充指令、处理审批并发起新任务。
 
-[English](README.md) · [中文](README_ZH.md) · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.md)
+[English](README.md) · [中文](README_ZH.md) · [更新日志](CHANGELOG.md)
 
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#环境要求)
 [![Node.js 20.19+](https://img.shields.io/badge/Node.js-20.19%2B-339933?logo=nodedotjs&logoColor=white)](#环境要求)

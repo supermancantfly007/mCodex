@@ -80,7 +80,7 @@ function Build-SourceRelease {
 
   foreach ($file in @(
     ".env.example", ".gitattributes", ".gitignore", "CHANGELOG.md", "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md", "LICENSE", "README.md", "README_ZH.md", "SECURITY.md", "manage.bat",
+    "LICENSE", "README.md", "README_ZH.md", "SECURITY.md", "manage.bat",
     "package.json", "package-lock.json", "tsconfig.json", "tsconfig.server.json",
     "vite.config.ts", "vitest.config.ts"
   )) {

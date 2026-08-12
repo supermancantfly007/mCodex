@@ -7,7 +7,7 @@
 Built specifically for Windows 10/11: check tasks, send follow-ups, handle
 approvals, and start new work from your phone while Codex Desktop stays on the PC.
 
-[English](README.md) · [中文](README_ZH.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
+[English](README.md) · [中文](README_ZH.md) · [Changelog](CHANGELOG.md)
 
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#requirements)
 [![Node.js 20.19+](https://img.shields.io/badge/Node.js-20.19%2B-339933?logo=nodedotjs&logoColor=white)](#requirements)
@@ -293,8 +293,6 @@ Before submitting a pull request:
 npm test -- --run
 npm run build
 ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
