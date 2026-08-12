@@ -62,6 +62,15 @@ The pairing code is valid for 10 minutes. After pairing, the device stays truste
 - Create projects and start new tasks
 - Switch Codex Desktop permission modes
 
+## Why mCodex?
+
+| Common approach | Practical pain point | How mCodex differs |
+| --- | --- | --- |
+| **Unofficial accounts, wrappers, or relay services** | They may require cookies or tokens and route requests through third parties, increasing credential and account risk. | mCodex does not take over authentication or proxy model requests. It reuses the official session in Codex Desktop. |
+| **Official ChatGPT mobile app** | It is a separate ChatGPT experience, not a mobile view of the same local Codex Desktop projects, tasks, approvals, and file changes. | mCodex keeps the current Desktop task context and works through your trusted LAN. |
+| **Remote desktop tools** | Streaming the whole screen means tiny controls, awkward typing, scrolling, and precise clicking on a phone. | mCodex provides a responsive, touch-friendly interface focused on Codex workflows. |
+| **CLI-only or infrastructure-heavy tools** | Terminal workflows are inconvenient on a phone, while multi-service deployments are excessive for one personal PC. | mCodex uses one Windows launcher, one local bridge, and a browser UI. |
+
 ## Screenshots
 
 <p align="center">
@@ -96,6 +105,10 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | Phone cannot open the page | Check that both devices share the same LAN and allow port `3210` on private networks |
 | Pairing code expired | Restart mCodex to generate a new code |
 | Startup failed | For source/portable installs, run `manage.bat logs` |
+
+## Friends
+
+- [**linux.do**](https://linux.do/)
 
 ## License
 
