@@ -326,15 +326,6 @@ scripts/manage.ps1          新电脑环境检测、安装和启动流程
 manage.bat                  Windows 管理入口
 ```
 
-## 参与贡献
-
-欢迎提交 Issue 和 Pull Request。涉及 CDP selector、鉴权、会话解析或远程访问的改动，请同时补充测试或复现步骤，并在提交前运行：
-
-```powershell
-npm run build
-npm test -- --run
-```
-
 ## 许可证
 
 本项目采用 [MIT License](LICENSE)。

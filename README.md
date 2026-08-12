@@ -283,17 +283,6 @@ Read [SECURITY.md](SECURITY.md) before enabling LAN access.
 | Tasks are visible but cannot be controlled | Check whether the local CDP connection is online |
 | Startup failed | Run `manage.bat logs` and check `.run-logs\bridge.err.log` |
 
-## Contributing
-
-Issues and pull requests are welcome. Changes to CDP selectors, authentication, session parsing, or remote access should include tests or reproduction steps.
-
-Before submitting a pull request:
-
-```powershell
-npm test -- --run
-npm run build
-```
-
 ## License
 
 [MIT](LICENSE)
