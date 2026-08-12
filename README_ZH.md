@@ -12,6 +12,7 @@
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#环境要求)
 [![Node.js 20.19+](https://img.shields.io/badge/Node.js-20.19%2B-339933?logo=nodedotjs&logoColor=white)](#环境要求)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f855a.svg)](LICENSE)
+[![最新版本](https://img.shields.io/github/v/release/zqlrts60/mCodex?display_name=tag&label=release)](https://github.com/zqlrts60/mCodex/releases/latest)
 
 </div>
 
@@ -23,13 +24,9 @@
 
 mCodex 与 Codex Desktop 运行在同一台 Windows 电脑上。它只读解析 `CODEX_HOME` 中的本地任务记录，并通过本机 CDP 连接把交互操作交给 Codex Desktop 执行。mCodex 不增加云端中转服务，也不会上传你的对话。
 
-<p align="center">
-  <a href="readme/demo.mp4?raw=1">
-    <img src="readme/demo-cover.jpg" alt="mCodex 在电脑端 Codex Desktop 与手机浏览器之间同步任务" width="900">
-  </a>
-</p>
+https://github.com/user-attachments/assets/a5a2ce4b-d82e-484e-8de3-d4ceade51807
 
-<p align="center"><strong><a href="readme/demo.mp4?raw=1">观看 1 分 29 秒完整演示</a></strong></p>
+<p align="center"><strong>1 分 29 秒产品演示</strong></p>
 
 ## 为什么需要 mCodex？
 
@@ -127,6 +124,8 @@ manage.bat start
 ![mCodex 启动终端，显示 Codex Desktop、局域网地址与配对信息](readme/terminal.png)
 
 ## 下载与安装
+
+可以前往 [GitHub Releases](https://github.com/zqlrts60/mCodex/releases/latest) 下载最新的免构建发行包。
 
 ### 发布包
 

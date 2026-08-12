@@ -12,6 +12,7 @@ approvals, and start new work from your phone while Codex Desktop stays on the P
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#requirements)
 [![Node.js 20.19+](https://img.shields.io/badge/Node.js-20.19%2B-339933?logo=nodedotjs&logoColor=white)](#requirements)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f855a.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/zqlrts60/mCodex?display_name=tag)](https://github.com/zqlrts60/mCodex/releases/latest)
 
 </div>
 
@@ -23,13 +24,9 @@ approvals, and start new work from your phone while Codex Desktop stays on the P
 
 mCodex runs alongside Codex Desktop on the same Windows PC. It reads the local task history from `CODEX_HOME` without modifying session files, and delegates interactive actions to Codex Desktop through a local CDP connection. mCodex adds no cloud relay and does not upload your conversations.
 
-<p align="center">
-  <a href="readme/demo.mp4?raw=1">
-    <img src="readme/demo-cover.jpg" alt="mCodex synchronizing a Codex Desktop task with a phone browser" width="900">
-  </a>
-</p>
+https://github.com/user-attachments/assets/a5a2ce4b-d82e-484e-8de3-d4ceade51807
 
-<p align="center"><strong><a href="readme/demo.mp4?raw=1">Watch the 1:29 demo</a></strong></p>
+<p align="center"><strong>1:29 product demo</strong></p>
 
 ## Why mCodex?
 
@@ -114,6 +111,8 @@ The script checks Node.js and Codex Desktop, installs dependencies, builds mCode
 ![mCodex startup terminal showing Codex Desktop, LAN addresses, and pairing](readme/terminal.png)
 
 ## Download and installation
+
+Download the latest ready-to-run packages from [GitHub Releases](https://github.com/zqlrts60/mCodex/releases/latest).
 
 mCodex has three Windows release formats:
 
