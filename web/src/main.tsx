@@ -83,9 +83,9 @@ function clearBridgeToken(): void {
   window.dispatchEvent(new Event("bridge-auth-required"));
 }
 
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
+async function api<T>(url: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...init, signal: init?.signal ?? controller.signal, headers: { ...headers(), "Content-Type": "application/json", ...(init?.headers ?? {}) } });
     const body = await response.json().catch(() => ({}));
@@ -405,7 +405,7 @@ function App() {
     }
 
     try {
-      const desktop = await api<{ threadId: string }>(`/api/threads/${id}/open`, { method: "POST", body: "{}" });
+      const desktop = await api<{ threadId: string }>(`/api/threads/${id}/open`, { method: "POST", body: "{}" }, 10_000);
       if (requestId === openRequestRef.current && desktop.threadId) setDesktopThreadId(desktop.threadId);
     } catch (cause) {
       if (requestId === openRequestRef.current) setError(friendlyError(cause));

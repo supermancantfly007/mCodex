@@ -182,10 +182,19 @@ export async function createBridge() {
     } catch (error) { next(error); }
   });
   app.post("/api/threads/:id/open", async (req, res, next) => {
+    const cancellation = new AbortController();
+    const cancel = () => cancellation.abort();
+    req.once("aborted", cancel);
+    res.once("close", cancel);
     try {
       if (!await sessions.getThreadFile(req.params.id)) return void res.status(404).json({ error: "Thread not found" });
-      res.json(await cdp.openThread(req.params.id));
-    } catch (error) { next(error); }
+      res.json(await cdp.openThread(req.params.id, cancellation.signal));
+    } catch (error) {
+      if (!cancellation.signal.aborted) next(error);
+    } finally {
+      req.off("aborted", cancel);
+      res.off("close", cancel);
+    }
   });
   app.post("/api/threads/:id/send", async (req, res, next) => {
     try {

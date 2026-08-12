@@ -27,6 +27,15 @@ async function walkJsonl(root: string): Promise<string[]> {
   return result;
 }
 
+async function findJsonlById(roots: string[], threadId: string): Promise<string | null> {
+  for (const root of roots) {
+    const files = await walkJsonl(root);
+    const match = files.find((filePath) => path.basename(filePath).includes(threadId));
+    if (match) return match;
+  }
+  return null;
+}
+
 async function readRecords(filePath: string): Promise<ParsedRecord[]> {
   const records: ParsedRecord[] = [];
   const stream = createReadStream(filePath, { encoding: "utf8" });
@@ -160,8 +169,15 @@ export class SessionStore {
 
   async getThreadFile(threadId: string): Promise<string | null> {
     if (!UUID_PATTERN.test(threadId)) return null;
-    if (!this.filesById.has(threadId)) await this.listThreads();
-    return this.filesById.get(threadId) ?? null;
+    const cached = this.filesById.get(threadId);
+    if (cached) return cached;
+
+    // Newly created tasks are not in the in-memory catalog yet. Discover the
+    // rollout by its UUID first instead of rebuilding every thread summary on
+    // each receipt poll, which becomes very expensive with a large history.
+    const discovered = await findJsonlById([this.sessionsRoot, this.archivedRoot], threadId);
+    if (discovered) this.filesById.set(threadId, discovered);
+    return discovered;
   }
 
   async getTimeline(threadId: string): Promise<TimelineItem[]> {

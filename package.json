@@ -1,6 +1,6 @@
 {
   "name": "mcodex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A Windows-first mobile companion for Codex Desktop: view tasks, send follow-ups, handle approvals, and start new work from your phone over a trusted LAN.",
   "license": "MIT",

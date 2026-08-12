@@ -147,6 +147,7 @@ export function resolveRunningThreadIds(
 export class CodexCdpController {
   private browser: Browser | null = null;
   private controlChain: Promise<unknown> = Promise.resolve();
+  private openRequestVersion = 0;
   private readonly receipts = new Map<string, MessageReceipt>();
   private statusSnapshot: { value: CdpStatus; capturedAt: number } | null = null;
   private statusInFlight: Promise<CdpStatus> | null = null;
@@ -480,10 +481,17 @@ export class CodexCdpController {
     return (await this.projectCatalogFromPage(page)).projects;
   }
 
-  async openThread(threadId: string): Promise<{ threadId: string; openedAt: string }> {
+  async openThread(threadId: string, signal?: AbortSignal): Promise<{ threadId: string; openedAt: string }> {
+    const requestVersion = ++this.openRequestVersion;
     return this.runExclusive(async () => {
+      if (signal?.aborted || requestVersion !== this.openRequestVersion) {
+        throw new Error("Codex task navigation was superseded");
+      }
       const page = await this.mainPage();
       await this.ensureThread(page, threadId);
+      if (signal?.aborted || requestVersion !== this.openRequestVersion) {
+        throw new Error("Codex task navigation was superseded");
+      }
       return { threadId, openedAt: new Date().toISOString() };
     });
   }
@@ -551,8 +559,13 @@ export class CodexCdpController {
       const deadline = Date.now() + 20_000;
       while (Date.now() < deadline) {
         const threadId = await this.currentThreadId(page);
-        if (threadId && threadId !== previousThreadId && await this.sessions.containsUserMessage(threadId, content, sentAt)) {
-          const receipt = { threadId, acceptedAt: new Date().toISOString(), confirmed: true };
+        if (threadId && !threadId.startsWith("client-new-thread:") && threadId !== previousThreadId && await this.sessions.getThreadFile(threadId)) {
+          // The real rollout file is the durable acceptance receipt. Its first
+          // user message can be appended slightly later on slower machines and
+          // will arrive through the normal session watcher, so do not keep the
+          // phone's create dialog blocked on a second full-file read.
+          const confirmed = await this.sessions.containsUserMessage(threadId, content, sentAt);
+          const receipt = { threadId, acceptedAt: new Date().toISOString(), confirmed };
           this.receipts.set(clientMessageId, receipt);
           return { ...receipt, duplicate: false };
         }
