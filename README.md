@@ -29,7 +29,7 @@ mCodex runs alongside Codex Desktop on the same Windows PC. It reads the local t
   </a>
 </p>
 
-<p align="center"><strong><a href="readme/demo.mp4?raw=1">Watch the 1:43 demo</a></strong></p>
+<p align="center"><strong><a href="readme/demo.mp4?raw=1">Watch the 1:29 demo</a></strong></p>
 
 ## Why mCodex?
 

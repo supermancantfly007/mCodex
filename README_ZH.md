@@ -29,7 +29,7 @@ mCodex 与 Codex Desktop 运行在同一台 Windows 电脑上。它只读解析 
   </a>
 </p>
 
-<p align="center"><strong><a href="readme/demo.mp4?raw=1">观看 1 分 43 秒完整演示</a></strong></p>
+<p align="center"><strong><a href="readme/demo.mp4?raw=1">观看 1 分 29 秒完整演示</a></strong></p>
 
 ## 为什么需要 mCodex？
 
