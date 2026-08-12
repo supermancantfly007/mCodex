@@ -2,7 +2,7 @@
 
 # mCodex
 
-**Codex Desktop 的手机端**
+**手机控制工具Codex Desktop**
 
 Codex Desktop 留在电脑上，随时用手机查看进度、追加指令和处理审批。
 
