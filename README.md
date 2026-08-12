@@ -2,9 +2,9 @@
 
 # mCodex
 
-**Use Codex Desktop from your phone on a trusted LAN**
+**Codex Desktop on your phone**
 
-View tasks, send follow-ups, handle approvals, and start new work while Codex Desktop stays on your Windows PC.
+Leave Codex Desktop running on your PC, and use your phone to check progress, send follow-ups, and handle approvals.
 
 [English](README.md) · [中文](README_ZH.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/zqlrts60/mCodex/releases)
 
@@ -47,11 +47,17 @@ cd mCodex
 
 ## Connect your phone
 
-1. Connect the phone and PC to the same trusted Wi-Fi or LAN.
-2. Start mCodex using one of the methods above.
-3. Scan the QR code on the PC page, or open the displayed LAN address and enter the pairing code.
+### On the same network
+
+1. Start mCodex using one of the methods above.
+2. Connect the phone and PC to the same Wi-Fi or network.
+3. Scan the QR code on the PC page, or open the displayed address and enter the pairing code.
 
 The pairing code is valid for 10 minutes. After pairing, the device stays trusted until the saved token is revoked.
+
+### Remote access
+
+To use mCodex away from home, connect it through a private-network or tunneling tool such as Tailscale, frp, or PeanutHull, then open the resulting address on your phone. Only publish the mCodex service on port `3210`; never expose the Codex control port `9222`.
 
 ## What you can do
 
@@ -67,7 +73,7 @@ The pairing code is valid for 10 minutes. After pairing, the device stays truste
 | Common approach | Practical pain point | How mCodex differs |
 | --- | --- | --- |
 | **Unofficial accounts, wrappers, or relay services** | They may require cookies or tokens and route requests through third parties, increasing credential and account risk. | mCodex does not take over authentication or proxy model requests. It reuses the official session in Codex Desktop. |
-| **Official ChatGPT mobile app** | It is a separate ChatGPT experience, not a mobile view of the same local Codex Desktop projects, tasks, approvals, and file changes. | mCodex keeps the current Desktop task context and works through your trusted LAN. |
+| **Official ChatGPT mobile app** | It is a separate ChatGPT experience, not a mobile view of the same local Codex Desktop projects, tasks, approvals, and file changes. | mCodex keeps the current Desktop task context on your phone. |
 | **Remote desktop tools** | Streaming the whole screen means tiny controls, awkward typing, scrolling, and precise clicking on a phone. | mCodex provides a responsive, touch-friendly interface focused on Codex workflows. |
 | **CLI-only or infrastructure-heavy tools** | Terminal workflows are inconvenient on a phone, while multi-service deployments are excessive for one personal PC. | mCodex uses one Windows launcher, one local bridge, and a browser UI. |
 
@@ -90,10 +96,10 @@ The pairing code is valid for 10 minutes. After pairing, the device stays truste
 
 ## Important security notes
 
-- Use mCodex only on a trusted LAN or private network.
+- Keep pairing enabled and protect any address exposed through a tunneling service.
 - Never expose or forward the Codex CDP port `9222`.
 - mCodex does not provide a public relay, user accounts, or multi-user isolation.
-- Third-party tunneling and remote-network tools are outside the project's supported security boundary.
+- Third-party tunneling and remote-network tools are supported as connection options but remain outside the project's security and availability responsibility.
 
 See [SECURITY.md](SECURITY.md) for the full security policy.
 
@@ -102,7 +108,7 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | Problem | What to do |
 | --- | --- |
 | Codex control is offline | Fully quit Codex Desktop, then start mCodex again |
-| Phone cannot open the page | Check that both devices share the same LAN and allow port `3210` on private networks |
+| Phone cannot open the page | On the same network, check port `3210`; remotely, check the tunneling or private-network configuration |
 | Pairing code expired | Restart mCodex to generate a new code |
 | Startup failed | For source/portable installs, run `manage.bat logs` |
 
