@@ -6,13 +6,13 @@
   "license": "MIT",
   "author": "mCodex contributors",
   "type": "module",
-  "homepage": "https://github.com/your-org/mcodex#readme",
+  "homepage": "https://github.com/zqlrts60/mCodex#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-org/mcodex.git"
+    "url": "git+https://github.com/zqlrts60/mCodex.git"
   },
   "bugs": {
-    "url": "https://github.com/your-org/mcodex/issues"
+    "url": "https://github.com/zqlrts60/mCodex/issues"
   },
   "keywords": [
     "codex",
