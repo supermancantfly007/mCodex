@@ -1,5 +1,18 @@
 # 更新记录
 
+## [Unreleased]
+
+### Added
+
+- 增加实验性的 macOS 源码启动与管理脚本，支持官方 Codex Desktop
+- 增加 Windows/macOS 任务深链平台适配及自动化测试
+- 增加 VPS Caddy、SSH 反向隧道、Cloudflare Access 和 LaunchAgent 公网部署模板
+
+### Security
+
+- 新增 `BRIDGE_EXTERNAL_ACCESS`，允许 Bridge 只监听回环地址时仍强制启用配对和设备 Token 鉴权
+- 公网部署模板禁止代理本机配对信息，并默认丢弃可能包含 Token 的访问日志
+
 ## [0.1.1] - 2026-08-12
 
 ### Fixed

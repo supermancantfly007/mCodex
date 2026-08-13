@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mcodex.public-tunnel</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/absolute/private/path/start-public-tunnel.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+    <key>NetworkState</key>
+    <true/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/you/Library/Logs/mcodex-public-tunnel.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/Library/Logs/mcodex-public-tunnel.error.log</string>
+</dict>
+</plist>

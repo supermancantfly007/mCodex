@@ -9,13 +9,14 @@ Codex Desktop 留在电脑上，随时用手机查看进度、追加指令和处
 [English](README.md) · [中文](README_ZH.md) · [更新日志](CHANGELOG.md) · [版本下载](https://github.com/zqlrts60/mCodex/releases)
 
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#环境要求)
+[![macOS 12+](https://img.shields.io/badge/macOS-12%2B%20experimental-000000?logo=apple)](#macos-源码实验支持)
 [![最新版本](https://img.shields.io/github/v/release/zqlrts60/mCodex?display_name=tag&label=release)](https://github.com/zqlrts60/mCodex/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f855a.svg)](LICENSE)
 
 </div>
 
 > [!NOTE]
-> mCodex 是非官方社区项目。电脑端目前仅支持 Windows 10/11，并要求安装且登录 Microsoft Store 版 Codex Desktop。
+> mCodex 是非官方社区项目。本 Fork 基于 [zqlrts60/mCodex](https://github.com/zqlrts60/mCodex)，增加实验性的 macOS 与 VPS 公网访问支持。Windows 10/11 为原有支持平台；两者都要求安装并登录官方 Codex Desktop。
 
 https://github.com/user-attachments/assets/a5a2ce4b-d82e-484e-8de3-d4ceade51807
 
@@ -38,12 +39,31 @@ https://github.com/user-attachments/assets/a5a2ce4b-d82e-484e-8de3-d4ceade51807
 需要 Node.js `20.19+` 或 `22.12+`：
 
 ```powershell
-git clone https://github.com/zqlrts60/mCodex.git
+git clone https://github.com/supermancantfly007/mCodex.git
 cd mCodex
 .\manage.bat
 ```
 
 `manage.bat` 会检查依赖、构建项目、以本地控制模式启动 Codex Desktop、启动 mCodex，并自动打开电脑端页面。
+
+### 4. macOS 源码（实验支持）
+
+需要 macOS 12+、官方 Codex Desktop，以及 Node.js `20.19+` 或 `22.12+`：
+
+```zsh
+git clone https://github.com/supermancantfly007/mCodex.git
+cd mCodex
+./scripts/manage-macos.sh start
+```
+
+第一次运行前请用 `Command-Q` 完全退出 Codex Desktop。脚本会用仅监听 `127.0.0.1:9222` 的本地控制通道重新启动 Codex，再启动 Bridge。常用命令：
+
+```zsh
+./scripts/manage-macos.sh status   # 查看状态
+./scripts/manage-macos.sh logs     # 查看日志
+./scripts/manage-macos.sh stop     # 只停止 Bridge，不终止 Codex 任务
+./scripts/manage-macos.sh tunnel   # VPS/SSH 隧道模式：Bridge 仅监听回环地址但强制配对鉴权
+```
 
 ## 手机连接
 
@@ -57,7 +77,7 @@ cd mCodex
 
 ### 远程访问
 
-需要在外网使用时，可以搭配 Tailscale、frp、花生壳等组网或内网穿透工具，再用手机打开工具提供的访问地址。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
+需要在外网使用时，可以搭配 Tailscale、frp、花生壳等组网或内网穿透工具。也可以不安装组网客户端，通过“VPS Caddy + SSH 反向隧道 + Cloudflare Access”提供普通 HTTPS 网页入口，详见 [VPS 公网部署指南](deploy/README_ZH.md)。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
 
 ## 可以做什么
 
@@ -75,7 +95,7 @@ cd mCodex
 | **非官方账号、套壳客户端或中转服务** | 可能要求提交 Cookie、Token，或把请求发送到第三方中转，增加凭据与账号风险。 | mCodex 不接管登录、不代理模型请求，只复用 Codex Desktop 已有的官方登录态。 |
 | **官方 ChatGPT 手机 App** | 它是独立的 ChatGPT 使用体验，并不是本机 Codex Desktop 项目、任务、审批和文件修改的移动视图。 | mCodex 可以直接在手机上保留当前 Desktop 任务上下文。 |
 | **远程桌面工具** | 传输整个屏幕，手机上按钮细小，输入、滚动和精确点击都不方便。 | mCodex 提供响应式、触控友好的 Codex 工作界面。 |
-| **仅支持 CLI 或架构复杂的工具** | CLI 不适合手机操作，多服务部署对控制一台个人电脑又过于复杂。 | mCodex 只需一个 Windows 启动入口、一个本地 Bridge 和浏览器界面。 |
+| **仅支持 CLI 或架构复杂的工具** | CLI 不适合手机操作，多服务部署对控制一台个人电脑又过于复杂。 | mCodex 使用一个平台启动入口、一个本地 Bridge 和浏览器界面。 |
 
 ## 界面预览
 
@@ -89,8 +109,8 @@ cd mCodex
 
 ## 环境要求
 
-- 电脑端为 Windows 10 或 11
-- 已安装并登录 Microsoft Store 版 Codex Desktop
+- Windows 10/11，或实验支持的 macOS 12+
+- Windows 安装 Microsoft Store 版 Codex Desktop；macOS 安装官方 Codex Desktop
 - 手机或其他设备使用现代浏览器
 - 仅源码方式需要 Node.js
 
@@ -99,6 +119,7 @@ cd mCodex
 - 使用内网穿透时保留配对鉴权，并妥善保护对外访问地址。
 - 不要暴露或转发 Codex CDP 端口 `9222`。
 - mCodex 不提供公网中转、用户账号或多用户隔离。
+- 公网域名应增加 Cloudflare Access 等独立身份认证，并禁止代理 `/api/pairing-info`。
 - 第三方内网穿透和远程组网可以作为连接方式，但其安全性和可用性由对应工具及使用者负责。
 
 完整说明见 [SECURITY.md](SECURITY.md)。
@@ -111,6 +132,8 @@ cd mCodex
 | 手机打不开页面 | 同一网络下检查 `3210` 端口；远程使用时检查组网或内网穿透配置 |
 | 配对码失效 | 重启 mCodex 获取新的配对码 |
 | 启动失败 | 源码版或便携版可运行 `manage.bat logs` 查看日志 |
+| macOS 提示 Desktop 正在运行但控制通道离线 | 用 `Command-Q` 完全退出 Codex，再重新运行 `manage-macos.sh` |
+| macOS 启动失败 | 运行 `./scripts/manage-macos.sh logs`，并确认 `/Applications/ChatGPT.app` 存在 |
 
 ## 友情链接
 

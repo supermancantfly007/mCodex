@@ -1,0 +1,26 @@
+#!/bin/zsh
+
+set -eu
+set -o pipefail
+
+# Copy this file outside the public repository, replace every example value,
+# then make that private copy executable. Keep the SSH key out of this repo.
+MCODEX_PROJECT="/Users/you/workspace/mCodex"
+VPS_USER="ubuntu"
+VPS_HOST="vps.example.com"
+VPS_SSH_KEY="$HOME/.ssh/mcodex_vps"
+VPS_BIND_ADDRESS="127.0.0.1"
+VPS_TUNNEL_PORT="13210"
+
+export MCODEX_NO_OPEN=1
+"${MCODEX_PROJECT}/scripts/manage-macos.sh" tunnel
+
+exec /usr/bin/ssh -NT \
+  -i "$VPS_SSH_KEY" \
+  -o BatchMode=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=accept-new \
+  -R "${VPS_BIND_ADDRESS}:${VPS_TUNNEL_PORT}:127.0.0.1:3210" \
+  "${VPS_USER}@${VPS_HOST}"

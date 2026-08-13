@@ -1,0 +1,37 @@
+# Public HTTPS entry for an mCodex Bridge reached through an SSH reverse tunnel.
+# Replace the site name and upstream. If Caddy runs in Docker, use the host-side
+# address that is reachable from its Docker network rather than 127.0.0.1.
+mcodex.example.com {
+	encode zstd gzip
+
+	# The pairing code must only be read from the Mac page or local logs. A
+	# reverse tunnel otherwise makes the proxy request appear local to mCodex.
+	@local_pairing_info path /api/pairing-info
+	respond @local_pairing_info 404
+
+	request_body {
+		max_size 64MB
+	}
+
+	header {
+		Cache-Control "no-store"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:13210 {
+		transport http {
+			dial_timeout 5s
+			read_timeout 360s
+		}
+	}
+
+	# mCodex currently uses the device token in WebSocket and media URLs.
+	# Discard access logs so those query strings are never written to disk.
+	log {
+		output discard
+	}
+}

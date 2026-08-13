@@ -2,14 +2,16 @@
 
 ## 安全边界
 
-mCodex 是运行在 Windows 本机上的非官方社区项目，用于通过可信局域网访问 Codex Desktop。它可以读取 `CODEX_HOME` 下的会话记录，并通过本地 CDP 请求 Codex Desktop 执行操作。
+mCodex 是运行在 Windows 或实验支持的 macOS 主机上的非官方社区项目，用于通过可信网络访问 Codex Desktop。它可以读取 `CODEX_HOME` 下的会话记录，并通过本地 CDP 请求 Codex Desktop 执行操作。
 
 请遵守以下原则：
 
 - 默认只绑定 `127.0.0.1`；只有在明确需要局域网访问时才设置 `BRIDGE_HOST=0.0.0.0`。
 - 局域网模式必须使用至少 24 个字符的随机 `BRIDGE_TOKEN`。
+- 通过反向代理或 SSH 隧道访问回环地址时必须设置 `BRIDGE_EXTERNAL_ACCESS=true`，以启用配对和 Token 鉴权。
 - 不要把 `9222` 端口暴露到局域网、公网或端口转发服务。
 - 不要把 mCodex 直接部署为公网 SaaS；当前版本没有多用户隔离、细粒度权限或审计系统。
+- 公网反向代理必须增加独立身份认证、禁止访问 `/api/pairing-info`，并避免记录包含设备 Token 的 WebSocket 和媒体 URL。
 - 会话内容、图片、项目路径和日志可能包含敏感信息，请只在可信设备和网络中使用。
 
 ## 本地数据
@@ -20,9 +22,8 @@ mCodex 不上传会话内容，也不包含遥测功能。设备信任 Token 默
 
 请不要在公开 Issue 中发布可直接利用的漏洞、Token、会话内容或截图。发布仓库后，请通过 GitHub Security Advisory 或项目维护者指定的私密联系方式报告，并提供：
 
-- 受影响的版本和 Windows 版本
+- 受影响的 mCodex、Codex Desktop 和操作系统版本
 - 可重复的步骤或最小复现
 - 潜在影响和建议修复方向
 
 在修复发布前，请避免公开漏洞细节。mCodex 当前仍处于实验阶段，不承诺任何公网部署安全性。
-

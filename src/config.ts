@@ -5,7 +5,17 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
 const configuredToken = process.env.BRIDGE_TOKEN?.trim() ?? "";
-const external = !["127.0.0.1", "localhost", "::1"].includes(host);
+const loopbackHosts = ["127.0.0.1", "localhost", "::1"];
+
+export function resolveExternalAccess(hostname: string, configured: string | undefined): boolean {
+  const exposedByHost = !loopbackHosts.includes(hostname.toLowerCase());
+  if (configured == null || !configured.trim()) return exposedByHost;
+  if (/^(?:1|true|yes|on)$/i.test(configured.trim())) return true;
+  if (/^(?:0|false|no|off)$/i.test(configured.trim())) return exposedByHost;
+  throw new Error("BRIDGE_EXTERNAL_ACCESS must be true or false when it is set");
+}
+
+const external = resolveExternalAccess(host, process.env.BRIDGE_EXTERNAL_ACCESS);
 const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
 const tokenFile = process.env.BRIDGE_TOKEN_FILE?.trim() || path.join(codexHome, "remote-bridge-token");
 
@@ -36,7 +46,7 @@ const resolvedToken = persistentToken();
 const token = configuredToken || resolvedToken.value;
 
 if (external && token.length < 24) {
-  throw new Error("BRIDGE_TOKEN must contain at least 24 characters when BRIDGE_HOST is not loopback");
+  throw new Error("BRIDGE_TOKEN must contain at least 24 characters when remote access is enabled");
 }
 
 export const config = {

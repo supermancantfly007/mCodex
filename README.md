@@ -9,13 +9,14 @@ Leave Codex Desktop running on your PC, and use your phone to check progress, se
 [English](README.md) · [中文](README_ZH.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/zqlrts60/mCodex/releases)
 
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#requirements)
+[![macOS 12+](https://img.shields.io/badge/macOS-12%2B%20experimental-000000?logo=apple)](#4-macos-from-source-experimental)
 [![Latest Release](https://img.shields.io/github/v/release/zqlrts60/mCodex?display_name=tag)](https://github.com/zqlrts60/mCodex/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f855a.svg)](LICENSE)
 
 </div>
 
 > [!NOTE]
-> mCodex is an unofficial community project. The PC host currently supports only Windows 10/11 with the Microsoft Store version of Codex Desktop installed and signed in.
+> mCodex is an unofficial community project. This fork is based on [zqlrts60/mCodex](https://github.com/zqlrts60/mCodex) and adds experimental macOS and public-VPS access support. Windows 10/11 remains the original supported host; both platforms require the official Codex Desktop app to be installed and signed in.
 
 https://github.com/user-attachments/assets/a5a2ce4b-d82e-484e-8de3-d4ceade51807
 
@@ -38,12 +39,24 @@ Use this when you prefer an unpacked package. Node.js is included.
 Requires Node.js `20.19+` or `22.12+`:
 
 ```powershell
-git clone https://github.com/zqlrts60/mCodex.git
+git clone https://github.com/supermancantfly007/mCodex.git
 cd mCodex
 .\manage.bat
 ```
 
 `manage.bat` checks dependencies, builds the project, starts Codex Desktop with local control enabled, starts mCodex, and opens the local page.
+
+### 4. macOS from source (experimental)
+
+Requires macOS 12+, the official Codex Desktop app, and Node.js `20.19+` or `22.12+`:
+
+```zsh
+git clone https://github.com/supermancantfly007/mCodex.git
+cd mCodex
+./scripts/manage-macos.sh start
+```
+
+Fully quit Codex Desktop with `Command-Q` before the first run. The launcher restarts it with a control channel bound only to `127.0.0.1:9222`, then starts the Bridge. Use `manage-macos.sh tunnel` for an authenticated, loopback-only Bridge behind an SSH reverse tunnel.
 
 ## Connect your phone
 
@@ -57,7 +70,7 @@ The pairing code is valid for 10 minutes. After pairing, the device stays truste
 
 ### Remote access
 
-To use mCodex away from home, connect it through a private-network or tunneling tool such as Tailscale, frp, or PeanutHull, then open the resulting address on your phone. Only publish the mCodex service on port `3210`; never expose the Codex control port `9222`.
+To use mCodex away from home, connect it through a private-network or tunneling tool such as Tailscale, frp, or PeanutHull. A normal HTTPS endpoint without a private-network client can also be built with VPS Caddy, an SSH reverse tunnel, and an identity-aware proxy; see the [Chinese VPS deployment guide](deploy/README_ZH.md). Only forward the mCodex service on port `3210`; never expose the Codex control port `9222`.
 
 ## What you can do
 
@@ -75,7 +88,7 @@ To use mCodex away from home, connect it through a private-network or tunneling 
 | **Unofficial accounts, wrappers, or relay services** | They may require cookies or tokens and route requests through third parties, increasing credential and account risk. | mCodex does not take over authentication or proxy model requests. It reuses the official session in Codex Desktop. |
 | **Official ChatGPT mobile app** | It is a separate ChatGPT experience, not a mobile view of the same local Codex Desktop projects, tasks, approvals, and file changes. | mCodex keeps the current Desktop task context on your phone. |
 | **Remote desktop tools** | Streaming the whole screen means tiny controls, awkward typing, scrolling, and precise clicking on a phone. | mCodex provides a responsive, touch-friendly interface focused on Codex workflows. |
-| **CLI-only or infrastructure-heavy tools** | Terminal workflows are inconvenient on a phone, while multi-service deployments are excessive for one personal PC. | mCodex uses one Windows launcher, one local bridge, and a browser UI. |
+| **CLI-only or infrastructure-heavy tools** | Terminal workflows are inconvenient on a phone, while multi-service deployments are excessive for one personal PC. | mCodex uses one platform launcher, one local bridge, and a browser UI. |
 
 ## Screenshots
 
@@ -89,8 +102,8 @@ To use mCodex away from home, connect it through a private-network or tunneling 
 
 ## Requirements
 
-- Windows 10 or 11 on the host PC
-- Microsoft Store version of Codex Desktop, installed and signed in
+- Windows 10/11, or experimentally macOS 12+
+- Microsoft Store Codex Desktop on Windows, or the official Codex Desktop app on macOS
 - A modern browser on the phone or another device
 - Node.js only when running from source
 
@@ -99,6 +112,7 @@ To use mCodex away from home, connect it through a private-network or tunneling 
 - Keep pairing enabled and protect any address exposed through a tunneling service.
 - Never expose or forward the Codex CDP port `9222`.
 - mCodex does not provide a public relay, user accounts, or multi-user isolation.
+- Put an independent identity layer such as Cloudflare Access in front of public domains and block proxy access to `/api/pairing-info`.
 - Third-party tunneling and remote-network tools are supported as connection options but remain outside the project's security and availability responsibility.
 
 See [SECURITY.md](SECURITY.md) for the full security policy.
@@ -111,6 +125,8 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | Phone cannot open the page | On the same network, check port `3210`; remotely, check the tunneling or private-network configuration |
 | Pairing code expired | Restart mCodex to generate a new code |
 | Startup failed | For source/portable installs, run `manage.bat logs` |
+| macOS says Desktop is running without control | Fully quit Codex with `Command-Q`, then run `manage-macos.sh` again |
+| macOS startup failed | Run `./scripts/manage-macos.sh logs` and confirm `/Applications/ChatGPT.app` exists |
 
 ## Friends
 

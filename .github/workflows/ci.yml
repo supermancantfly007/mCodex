@@ -7,7 +7,10 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
     steps:
@@ -31,6 +34,12 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Validate macOS launchers and deployment examples
+        if: runner.os == 'macOS'
+        run: |
+          zsh -n scripts/manage-macos.sh scripts/start-codex-cdp-macos.sh deploy/examples/start-public-tunnel.sh.example
+          plutil -lint deploy/examples/com.mcodex.public-tunnel.plist.example
 
       - name: Audit production dependencies
         run: npm audit --omit=dev

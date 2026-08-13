@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { openCodexThread } from "../platform/codex-deep-link.js";
 import { normalizeText, SessionStore } from "../sessions/store.js";
 import type { ApprovalDecision, ApprovalRequest } from "../types.js";
 
@@ -274,12 +274,6 @@ export class CodexCdpController {
 
 
 
-  private openDeepLink(threadId: string): void {
-    if (process.platform !== "win32") throw new Error("Opening Codex thread deep links is currently implemented for Windows only");
-    const child = spawn("explorer.exe", [`codex://threads/${threadId}`], { detached: true, stdio: "ignore", windowsHide: true });
-    child.unref();
-  }
-
   private async ensureThread(page: Page, threadId: string): Promise<void> {
     if (await this.currentThreadId(page) === threadId) return;
     const startedAt = Date.now();
@@ -318,7 +312,7 @@ export class CodexCdpController {
     if (await this.currentThreadId(page) === threadId) return;
 
     if (remaining() <= 1) throw new Error("Codex task navigation timed out");
-    this.openDeepLink(threadId);
+    openCodexThread(threadId);
     await waitForTarget(3_000);
   }
 
