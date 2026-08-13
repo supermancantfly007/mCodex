@@ -1,0 +1,75 @@
+name: mcodex
+
+services:
+  mcodex:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcodex:local
+    container_name: mcodex
+    restart: unless-stopped
+    init: true
+    environment:
+      BRIDGE_HOST: 0.0.0.0
+      BRIDGE_PORT: 3210
+      BRIDGE_EXTERNAL_ACCESS: "true"
+      BRIDGE_TOKEN_FILE: /state/remote-bridge-token
+      CODEX_HOME: ${MCODEX_HOST_CODEX_HOME:?set MCODEX_HOST_CODEX_HOME in .env.docker}
+      CODEX_CDP_URL: http://host.docker.internal:9222
+      MCODEX_LOCALE: ${MCODEX_LOCALE:-zh-CN}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${MCODEX_LOCAL_PORT:-3210}:3210"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ${MCODEX_HOST_CODEX_HOME:?set MCODEX_HOST_CODEX_HOME in .env.docker}
+        target: ${MCODEX_HOST_CODEX_HOME:?set MCODEX_HOST_CODEX_HOME in .env.docker}
+        read_only: true
+      - type: bind
+        source: ${MCODEX_HOST_PROJECTS_ROOT:?set MCODEX_HOST_PROJECTS_ROOT in .env.docker}
+        target: ${MCODEX_HOST_PROJECTS_ROOT:?set MCODEX_HOST_PROJECTS_ROOT in .env.docker}
+        read_only: true
+      - type: bind
+        source: ./.run-docker/bridge
+        target: /state
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+
+  tunnel:
+    profiles: ["vps"]
+    build:
+      context: ./deploy/docker/tunnel
+    image: mcodex-tunnel:local
+    container_name: mcodex-tunnel
+    restart: unless-stopped
+    init: true
+    depends_on:
+      mcodex:
+        condition: service_healthy
+    environment:
+      MCODEX_VPS_HOST: ${MCODEX_VPS_HOST:?set MCODEX_VPS_HOST in .env.docker}
+      MCODEX_VPS_USER: ${MCODEX_VPS_USER:-mcodex-tunnel}
+      MCODEX_VPS_TUNNEL_PORT: ${MCODEX_VPS_TUNNEL_PORT:-13210}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - type: bind
+        source: ${MCODEX_VPS_SSH_KEY:?set MCODEX_VPS_SSH_KEY in .env.docker}
+        target: /run/secrets/mcodex_vps_ssh_key
+        read_only: true
+      - type: bind
+        source: ./.run-docker/tunnel
+        target: /state
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

@@ -9,7 +9,7 @@ Leave Codex Desktop running on your PC, and use your phone to check progress, se
 [English](README.md) · [中文](README_ZH.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/zqlrts60/mCodex/releases)
 
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#requirements)
-[![macOS 12+](https://img.shields.io/badge/macOS-12%2B%20experimental-000000?logo=apple)](#4-macos-from-source-experimental)
+[![macOS 12+](https://img.shields.io/badge/macOS-12%2B%20experimental-000000?logo=apple)](#4-macos--docker-experimental)
 [![Latest Release](https://img.shields.io/github/v/release/zqlrts60/mCodex?display_name=tag)](https://github.com/zqlrts60/mCodex/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f855a.svg)](LICENSE)
 
@@ -46,17 +46,25 @@ cd mCodex
 
 `manage.bat` checks dependencies, builds the project, starts Codex Desktop with local control enabled, starts mCodex, and opens the local page.
 
-### 4. macOS from source (experimental)
+### 4. macOS + Docker (experimental)
 
-Requires macOS 12+, the official Codex Desktop app, and Node.js `20.19+` or `22.12+`:
+Requires macOS 12+, the official Codex Desktop app, and Docker Desktop. The Bridge, web UI, and optional SSH tunnel run in local containers, so mCodex does not require Node.js on the Mac host:
 
 ```zsh
 git clone https://github.com/supermancantfly007/mCodex.git
 cd mCodex
-./scripts/manage-macos.sh start
+cp .env.docker.example .env.docker
+# Edit .env.docker and set at least the Codex home and projects root.
 ```
 
-Fully quit Codex Desktop with `Command-Q` before the first run. The launcher restarts it with a control channel bound only to `127.0.0.1:9222`, then starts the Bridge. Use `manage-macos.sh tunnel` for an authenticated, loopback-only Bridge behind an SSH reverse tunnel.
+For the first run, wait until any active Codex task finishes, fully quit Codex Desktop with `Command-Q`, then run:
+
+```zsh
+./scripts/manage-macos.sh cdp      # Native Codex; control stays on 127.0.0.1:9222
+./scripts/manage-docker.sh up      # Build and start the Bridge and optional VPS sidecar
+```
+
+Use `manage-docker.sh status`, `logs`, `restart`, `down`, and `open` for day-to-day control. `down` stops only the mCodex and tunnel containers; it does not quit Codex Desktop or stop a Codex task. `.env.docker` is ignored by Git and must remain private. The Bridge is published only on `127.0.0.1:3210`, while the container reaches Codex through `host.docker.internal`.
 
 ## Connect your phone
 
@@ -70,7 +78,7 @@ The pairing code is valid for 10 minutes. After pairing, the device stays truste
 
 ### Remote access
 
-To use mCodex away from home, connect it through a private-network or tunneling tool such as Tailscale, frp, or PeanutHull. A normal HTTPS endpoint without a private-network client can also be built with VPS Caddy, an SSH reverse tunnel, and an identity-aware proxy; see the [Chinese VPS deployment guide](deploy/README_ZH.md). Only forward the mCodex service on port `3210`; never expose the Codex control port `9222`.
+You do not need Tailscale or another private-network client. A normal HTTPS endpoint can be built with VPS Caddy, an SSH reverse tunnel, and Cloudflare Access. On macOS, the Docker Compose VPS profile manages the reverse-tunnel sidecar together with the Bridge; see the [Chinese VPS deployment guide](deploy/README_ZH.md). Only forward the mCodex service on port `3210`; never expose the Codex control port `9222`.
 
 ## What you can do
 
@@ -105,7 +113,7 @@ To use mCodex away from home, connect it through a private-network or tunneling 
 - Windows 10/11, or experimentally macOS 12+
 - Microsoft Store Codex Desktop on Windows, or the official Codex Desktop app on macOS
 - A modern browser on the phone or another device
-- Node.js only when running from source
+- Node.js for the Windows source workflow; the macOS Docker workflow does not require host Node.js
 
 ## Important security notes
 
@@ -125,8 +133,8 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | Phone cannot open the page | On the same network, check port `3210`; remotely, check the tunneling or private-network configuration |
 | Pairing code expired | Restart mCodex to generate a new code |
 | Startup failed | For source/portable installs, run `manage.bat logs` |
-| macOS says Desktop is running without control | Fully quit Codex with `Command-Q`, then run `manage-macos.sh` again |
-| macOS startup failed | Run `./scripts/manage-macos.sh logs` and confirm `/Applications/ChatGPT.app` exists |
+| macOS says Desktop is running without control | Wait for active tasks to finish, fully quit Codex with `Command-Q`, then run `./scripts/manage-macos.sh cdp` |
+| macOS container startup failed | Run `./scripts/manage-docker.sh status` and `./scripts/manage-docker.sh logs`, then check `.env.docker` |
 
 ## Friends
 

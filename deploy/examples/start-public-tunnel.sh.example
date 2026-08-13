@@ -3,6 +3,9 @@
 set -eu
 set -o pipefail
 
+# Legacy host-side example kept for existing deployments. New macOS installs
+# should use compose.yaml and scripts/manage-docker.sh instead.
+
 # Copy this file outside the public repository, replace every example value,
 # then make that private copy executable. Keep the SSH key out of this repo.
 MCODEX_PROJECT="/Users/you/workspace/mCodex"

@@ -7,6 +7,11 @@
 - 增加实验性的 macOS 源码启动与管理脚本，支持官方 Codex Desktop
 - 增加 Windows/macOS 任务深链平台适配及自动化测试
 - 增加 VPS Caddy、SSH 反向隧道、Cloudflare Access 和 LaunchAgent 公网部署模板
+- 增加 macOS Docker Compose 启动方式，将 Bridge/Web 与 SSH 反向隧道作为本地容器统一启停
+
+### Changed
+
+- macOS 推荐启动方式改为 Docker Compose；原宿主机 Node 与 LaunchAgent 隧道模板仅为已有部署保留
 
 ### Security
 

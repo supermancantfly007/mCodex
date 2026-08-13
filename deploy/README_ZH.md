@@ -1,56 +1,125 @@
 # 通过 VPS 公网访问
 
-这套部署不依赖 Tailscale。Mac 上的 mCodex 仍然只监听回环地址，Mac 主动建立 SSH 反向隧道，VPS 上的 Caddy 提供 HTTPS 网页入口。
+这套方案不依赖 Tailscale。Codex Desktop 原生运行在 Mac，mCodex Bridge 和 SSH 反向隧道运行在本地 Docker；VPS 上的 Caddy 提供普通 HTTPS 网页入口。
 
 ```text
-浏览器 → Cloudflare Access → VPS Caddy → SSH 反向隧道 → Mac mCodex :3210 → Codex CDP :9222
+浏览器
+  → Cloudflare Access
+  → VPS Caddy（HTTPS，可再加 Basic Auth）
+  → VPS 内部 socket proxy
+  → 仅监听 VPS 127.0.0.1 的 SSH 反向隧道
+  → Mac Docker 中的 mCodex :3210
+  → host.docker.internal:9222
+  → Codex Desktop
 ```
 
 ## 安全边界
 
-- Codex CDP `9222` 必须始终只监听 Mac 的 `127.0.0.1`，不得转发到 VPS。
-- 隧道模式必须设置 `BRIDGE_EXTERNAL_ACCESS=true`；`manage-macos.sh tunnel` 已自动设置。
-- 公网域名前必须配置 Cloudflare Access 或同等的身份认证，只允许自己的账号。
-- Caddy 必须阻止公网访问 `/api/pairing-info`，并关闭该站点的访问日志。
-- SSH 私钥、真实域名、VPS 地址、Token 和修改后的启动脚本不得提交到公共仓库。
+- Codex CDP `9222` 必须始终只监听 Mac 的 `127.0.0.1`，不得发布到局域网、Docker 端口或 VPS。
+- mCodex 只发布到 Mac 的 `127.0.0.1:3210`；SSH sidecar 通过 Compose 内部网络访问它。
+- SSH 远端端口只监听 VPS 的 `127.0.0.1`，不得使用 `0.0.0.0`。
+- 公网域名前必须配置 Cloudflare Access 或同等身份认证，只允许自己的账号。Caddy Basic Auth 可作为第二层保护。
+- Caddy 必须禁止公网读取 `/api/pairing-info`，并丢弃该站点访问日志，避免设备 Token 出现在日志中。
+- `.env.docker`、SSH 私钥、真实域名、VPS 地址和密码不得提交到公共仓库。
 
-## 1. 验证 Mac 端
+## 1. 配置 Mac
 
-先完全退出 Codex Desktop，然后运行：
+复制环境变量模板：
 
 ```zsh
-./scripts/manage-macos.sh tunnel
-./scripts/manage-macos.sh status
+cp .env.docker.example .env.docker
+chmod 600 .env.docker
 ```
 
-首次使用独立的远程控制 Profile 时，Codex Desktop 可能要求重新确认登录。Bridge 配对码会写入 `.run-logs/bridge.out.log`，也可在 Mac 本机打开 `http://127.0.0.1:3210` 查看。
+至少填写：
 
-## 2. 建立 SSH 反向隧道
+```dotenv
+MCODEX_HOST_CODEX_HOME=/Users/you/.codex
+MCODEX_HOST_PROJECTS_ROOT=/Users/you/workspace
+MCODEX_LOCAL_PORT=3210
 
-复制 `examples/start-public-tunnel.sh.example` 到公共仓库之外，填写 VPS 地址、用户和私钥位置。默认命令在 VPS 的 `127.0.0.1:13210` 创建监听，因此适用于直接运行在 VPS 主机上的 Caddy。
+MCODEX_VPS_ENABLED=true
+MCODEX_VPS_HOST=vps.example.com
+MCODEX_VPS_USER=mcodex-tunnel
+MCODEX_VPS_TUNNEL_PORT=13210
+MCODEX_VPS_SSH_KEY=/Users/you/.ssh/mcodex-tunnel
+```
 
-如果 Caddy 位于 Docker：
+SSH 私钥应设为 `600`。第一次使用本地控制通道时，先等 Codex 当前任务结束，再用 `Command-Q` 完全退出 Codex Desktop，然后运行：
 
-1. 找出 Caddy 所在 Docker 网络的宿主机网关地址。
-2. 让 SSH 远端转发只绑定该网关地址，而不是 `0.0.0.0`。
-3. 将 Caddy upstream 改成同一网关地址和端口。
-4. OpenSSH 默认 `GatewayPorts no` 会强制绑定回环地址；只在确认 VPS 防火墙后，为专用用户配置 `GatewayPorts clientspecified`。
+```zsh
+./scripts/manage-macos.sh cdp
+./scripts/manage-docker.sh up
+```
 
-不要为了让容器连接隧道而直接把端口暴露到 `0.0.0.0`。如果不得不这样做，必须同时用主机防火墙和云防火墙拒绝公网访问该端口。
+`manage-macos.sh cdp` 只负责原生启动 Codex 控制通道；Bridge 与隧道均由 Compose 管理。日常命令：
 
-## 3. 配置 Caddy 和 Cloudflare
+```zsh
+./scripts/manage-docker.sh status
+./scripts/manage-docker.sh logs
+./scripts/manage-docker.sh restart
+./scripts/manage-docker.sh down
+./scripts/manage-docker.sh open
+```
 
-把 `examples/Caddyfile` 中的域名和 upstream 合并到 VPS 的 Caddyfile。模板已经支持 WebSocket、最大 64 MB 请求体、禁止公网读取配对信息并关闭访问日志。
+`down` 不会退出 Codex Desktop，也不会停止正在执行的 Codex 任务。
 
-随后在 Cloudflare Zero Trust 中为该子域名创建 Access Application，只允许自己的邮箱或身份提供商账号。若 Cloudflare 使用 Full 模式且源站使用内部证书，可按现有 VPS 约定增加 `tls internal`。
+## 2. 限制 VPS 上的 SSH 隧道
 
-## 4. 配置 macOS 自动重连
+建议创建无登录 shell 的专用用户，例如 `mcodex-tunnel`，并只授权远程端口转发。对应公钥的 `authorized_keys` 选项应限制监听目标，例如：
 
-复制并修改：
+```text
+restrict,port-forwarding,permitlisten="127.0.0.1:13210" ssh-ed25519 AAAA... mcodex-tunnel
+```
 
-- `examples/start-public-tunnel.sh.example`
-- `examples/com.mcodex.public-tunnel.plist.example`
+在 `sshd_config.d` 中进一步限制该用户：只允许 remote forwarding、禁止 TTY/agent/X11，并保留 `GatewayPorts no`。修改后先运行 `sshd -t`，再 reload SSH 服务。
 
-将私有启动脚本设为仅自己可读写执行，然后把 plist 放入 `~/Library/LaunchAgents/`。加载前先手工运行脚本确认 Codex、Bridge 和 SSH 隧道都能正常启动。
+隧道最终必须是：
 
-LaunchAgent 不会强制退出一个已经运行但未开启 CDP 的 Codex Desktop。遇到这种情况，需要先在 Mac 上用 `Command-Q` 完全退出 Codex，再让任务重新启动。
+```text
+VPS 127.0.0.1:13210 → Mac Compose 服务 mcodex:3210
+```
+
+## 3. 让 Docker 中的 Caddy 访问回环隧道
+
+如果 Caddy 直接运行在 VPS 宿主机，可将 upstream 指向 `127.0.0.1:13210`。
+
+如果 Caddy 运行在 Docker，它无法直接访问宿主机回环地址。推荐用 `systemd-socket-proxyd` 建一个仅绑定到 Caddy Docker 网络网关的代理端口：
+
+```text
+Caddy 容器 → Docker 网关:13211 → VPS 127.0.0.1:13210
+```
+
+先用 `docker network inspect` 确认 Caddy 网络的宿主机网关地址，再让 `.socket` 单元只监听该地址。不要把代理端口绑定到 `0.0.0.0`，也不要为了容器连通性放宽 SSH 的回环监听限制。
+
+## 4. 配置 Caddy 和 Cloudflare
+
+把 [`examples/Caddyfile`](examples/Caddyfile) 中的站点合并到 VPS Caddyfile，并替换域名与 upstream。模板包含：
+
+- WebSocket 反向代理；
+- 64 MB 请求体上限；
+- `/api/pairing-info` 返回 `404`；
+- 安全响应头；
+- 丢弃访问日志。
+
+源站使用内部证书并由 Cloudflare 代理时，可按现有约定增加 `tls internal`。建议再加一层 Caddy Basic Auth，凭据只保存在 VPS 的 `600` 权限文件中。
+
+Cloudflare 侧需要：
+
+1. 确认该子域名的 DNS 记录已开启代理；
+2. 创建 Self-hosted Access Application；
+3. 目标设为完整 mCodex 域名；
+4. Allow 策略只包含自己的邮箱或身份提供商账号。
+
+## 5. 检查与运维
+
+在不触碰 Codex Desktop 的情况下，可以执行：
+
+```zsh
+./scripts/manage-docker.sh config
+./scripts/manage-docker.sh status
+```
+
+需要查看隧道重连情况时运行 `./scripts/manage-docker.sh logs`。VPS 侧同时检查 SSH 登录日志、socket proxy 状态和 Caddy 日志；不要在命令输出或文档中打印密码、私钥或完整设备 Token。
+
+`deploy/examples/start-public-tunnel.sh.example` 和 LaunchAgent plist 是早期宿主机 Node/SSH 方案，仅为已有部署保留。新的 macOS 部署应使用 `compose.yaml` 与 `scripts/manage-docker.sh`。

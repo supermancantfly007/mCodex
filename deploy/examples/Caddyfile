@@ -4,6 +4,12 @@
 mcodex.example.com {
 	encode zstd gzip
 
+	# Optional second layer in addition to Cloudflare Access. Generate the hash
+	# with `caddy hash-password` and keep the real credential outside the repo.
+	# basic_auth {
+	# 	admin <CADDY_PASSWORD_HASH>
+	# }
+
 	# The pairing code must only be read from the Mac page or local logs. A
 	# reverse tunnel otherwise makes the proxy request appear local to mCodex.
 	@local_pairing_info path /api/pairing-info
@@ -22,6 +28,8 @@ mcodex.example.com {
 		-Server
 	}
 
+	# When Caddy runs in Docker, point this at a systemd socket proxy bound only
+	# to the Caddy network's host gateway, for example 172.19.0.1:13211.
 	reverse_proxy 127.0.0.1:13210 {
 		transport http {
 			dial_timeout 5s

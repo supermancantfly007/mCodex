@@ -1,0 +1,13 @@
+.git
+.github
+.run-docker
+.run-logs
+.env
+.env.docker
+deploy/examples
+dist
+node_modules
+readme
+release
+*.log
+*.key

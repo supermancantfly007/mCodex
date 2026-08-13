@@ -9,7 +9,7 @@ Codex Desktop 留在电脑上，随时用手机查看进度、追加指令和处
 [English](README.md) · [中文](README_ZH.md) · [更新日志](CHANGELOG.md) · [版本下载](https://github.com/zqlrts60/mCodex/releases)
 
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](#环境要求)
-[![macOS 12+](https://img.shields.io/badge/macOS-12%2B%20experimental-000000?logo=apple)](#macos-源码实验支持)
+[![macOS 12+](https://img.shields.io/badge/macOS-12%2B%20experimental-000000?logo=apple)](#4-macos--docker实验支持)
 [![最新版本](https://img.shields.io/github/v/release/zqlrts60/mCodex?display_name=tag&label=release)](https://github.com/zqlrts60/mCodex/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f855a.svg)](LICENSE)
 
@@ -46,24 +46,35 @@ cd mCodex
 
 `manage.bat` 会检查依赖、构建项目、以本地控制模式启动 Codex Desktop、启动 mCodex，并自动打开电脑端页面。
 
-### 4. macOS 源码（实验支持）
+### 4. macOS + Docker（实验支持）
 
-需要 macOS 12+、官方 Codex Desktop，以及 Node.js `20.19+` 或 `22.12+`：
+需要 macOS 12+、官方 Codex Desktop 和 Docker Desktop。Bridge、Web 界面及可选的 SSH 隧道均在本地 Docker 中运行，Mac 宿主机无需为 mCodex 安装 Node.js：
 
 ```zsh
 git clone https://github.com/supermancantfly007/mCodex.git
 cd mCodex
-./scripts/manage-macos.sh start
+cp .env.docker.example .env.docker
+# 编辑 .env.docker，至少填写 Codex Home 和项目根目录
 ```
 
-第一次运行前请用 `Command-Q` 完全退出 Codex Desktop。脚本会用仅监听 `127.0.0.1:9222` 的本地控制通道重新启动 Codex，再启动 Bridge。常用命令：
+第一次使用时，等 Codex 中的任务结束后，用 `Command-Q` 完全退出 Codex Desktop，再执行：
 
 ```zsh
-./scripts/manage-macos.sh status   # 查看状态
-./scripts/manage-macos.sh logs     # 查看日志
-./scripts/manage-macos.sh stop     # 只停止 Bridge，不终止 Codex 任务
-./scripts/manage-macos.sh tunnel   # VPS/SSH 隧道模式：Bridge 仅监听回环地址但强制配对鉴权
+./scripts/manage-macos.sh cdp      # 原生启动 Codex，控制端口仅监听 127.0.0.1:9222
+./scripts/manage-docker.sh up      # 构建并启动 Bridge；启用 VPS 时也会启动隧道 sidecar
 ```
+
+之后用以下命令启停即可。`down` 只停止 mCodex 与隧道容器，不会退出 Codex Desktop，也不会终止 Codex 任务：
+
+```zsh
+./scripts/manage-docker.sh status
+./scripts/manage-docker.sh logs
+./scripts/manage-docker.sh restart
+./scripts/manage-docker.sh down
+./scripts/manage-docker.sh open
+```
+
+`.env.docker` 包含本机路径和可选的 VPS 信息，已被 Git 忽略，不要提交。Bridge 只发布到 Mac 的 `127.0.0.1:3210`；容器通过 `host.docker.internal` 连接 Codex 的本地控制端口。
 
 ## 手机连接
 
@@ -77,7 +88,7 @@ cd mCodex
 
 ### 远程访问
 
-需要在外网使用时，可以搭配 Tailscale、frp、花生壳等组网或内网穿透工具。也可以不安装组网客户端，通过“VPS Caddy + SSH 反向隧道 + Cloudflare Access”提供普通 HTTPS 网页入口，详见 [VPS 公网部署指南](deploy/README_ZH.md)。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
+不安装 Tailscale 等组网客户端，也可以通过“VPS Caddy + SSH 反向隧道 + Cloudflare Access”提供普通 HTTPS 网页入口。macOS Docker 方式把隧道作为 Compose sidecar 管理；在 `.env.docker` 中启用 VPS 配置后，`up` 和 `down` 会一起管理 Bridge 与隧道。详见 [VPS 公网部署指南](deploy/README_ZH.md)。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
 
 ## 可以做什么
 
@@ -112,7 +123,7 @@ cd mCodex
 - Windows 10/11，或实验支持的 macOS 12+
 - Windows 安装 Microsoft Store 版 Codex Desktop；macOS 安装官方 Codex Desktop
 - 手机或其他设备使用现代浏览器
-- 仅源码方式需要 Node.js
+- Windows 源码方式需要 Node.js；macOS Docker 方式不需要宿主机 Node.js
 
 ## 重要安全提示
 
@@ -132,8 +143,8 @@ cd mCodex
 | 手机打不开页面 | 同一网络下检查 `3210` 端口；远程使用时检查组网或内网穿透配置 |
 | 配对码失效 | 重启 mCodex 获取新的配对码 |
 | 启动失败 | 源码版或便携版可运行 `manage.bat logs` 查看日志 |
-| macOS 提示 Desktop 正在运行但控制通道离线 | 用 `Command-Q` 完全退出 Codex，再重新运行 `manage-macos.sh` |
-| macOS 启动失败 | 运行 `./scripts/manage-macos.sh logs`，并确认 `/Applications/ChatGPT.app` 存在 |
+| macOS 提示 Desktop 正在运行但控制通道离线 | 等当前任务结束后，用 `Command-Q` 完全退出 Codex，再运行 `./scripts/manage-macos.sh cdp` |
+| macOS 容器启动失败 | 运行 `./scripts/manage-docker.sh status` 和 `./scripts/manage-docker.sh logs`，并检查 `.env.docker` |
 
 ## 友情链接
 
