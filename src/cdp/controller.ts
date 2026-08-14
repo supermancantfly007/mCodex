@@ -64,6 +64,22 @@ export function isFollowUpMode(value: unknown): value is FollowUpMode {
   return value === "queue" || value === "steer" || value === "interrupt";
 }
 
+export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message = "Operation timed out"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function shouldUseAlternateFollowUpShortcut(configuredMode: unknown, requestedMode: "queue" | "steer"): boolean {
   // Desktop treats a missing (or legacy "interrupt") preference as "steer".
   const activeMode = configuredMode === "queue" ? "queue" : "steer";
@@ -146,6 +162,7 @@ export function resolveRunningThreadIds(
 
 export class CodexCdpController {
   private browser: Browser | null = null;
+  private browserConnectInFlight: Promise<Browser> | null = null;
   private controlChain: Promise<unknown> = Promise.resolve();
   private openRequestVersion = 0;
   private readonly receipts = new Map<string, MessageReceipt>();
@@ -156,21 +173,54 @@ export class CodexCdpController {
 
   private async connect(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser;
-    this.browser = await chromium.connectOverCDP(this.endpoint);
-    this.browser.on("disconnected", () => { this.browser = null; });
-    return this.browser;
+    if (this.browserConnectInFlight) return this.browserConnectInFlight;
+
+    const connection = withTimeout(
+      chromium.connectOverCDP(this.endpoint),
+      3_000,
+      "Connecting to the Codex control channel timed out",
+    );
+    this.browserConnectInFlight = connection;
+    try {
+      const browser = await connection;
+      this.browser = browser;
+      browser.on("disconnected", () => {
+        if (this.browser === browser) this.browser = null;
+      });
+      return browser;
+    } finally {
+      if (this.browserConnectInFlight === connection) this.browserConnectInFlight = null;
+    }
   }
 
   private async mainPage(): Promise<Page> {
-    const browser = await this.connect();
-    const pages = browser.contexts().flatMap((context) => context.pages());
-    const page = pages.find((candidate) => candidate.url() === "app://-/index.html");
-    if (!page) throw new Error("Codex main page was not found on the CDP endpoint");
-    return page;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const browser = await this.connect();
+      try {
+        const pages = browser.contexts().flatMap((context) => context.pages());
+        const page = pages.find((candidate) => candidate.url() === "app://-/index.html");
+        if (!page) throw new Error("Codex main page was not found on the CDP endpoint");
+        await withTimeout(
+          page.evaluate(() => document.readyState),
+          1_500,
+          "The cached Codex control connection stopped responding",
+        );
+        return page;
+      } catch (error) {
+        lastError = error;
+        if (this.browser === browser) this.browser = null;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   private async currentThreadId(page: Page): Promise<string | null> {
-    return page.locator("[data-above-composer-conversation-id]").first().getAttribute("data-above-composer-conversation-id").catch(() => null);
+    return withTimeout(
+      page.evaluate(() => document.querySelector("[data-above-composer-conversation-id]")?.getAttribute("data-above-composer-conversation-id") ?? null),
+      1_000,
+      "Reading the current Codex thread timed out",
+    ).catch(() => null);
   }
 
   private runExclusive<T>(job: () => Promise<T>): Promise<T> {
@@ -182,33 +232,54 @@ export class CodexCdpController {
   async status(): Promise<CdpStatus> {
     if (this.statusSnapshot && Date.now() - this.statusSnapshot.capturedAt < 400) return this.statusSnapshot.value;
     if (this.statusInFlight) return this.statusInFlight;
-    this.statusInFlight = this.readStatus();
+    const inFlight = withTimeout(
+      this.readStatus(),
+      5_000,
+      "Reading Codex Desktop status timed out",
+    ).catch((error: unknown): CdpStatus => {
+      this.browser = null;
+      return {
+        connected: false,
+        currentThreadId: null,
+        runningThreadIds: [],
+        editorReady: false,
+        stopReady: false,
+        approval: null,
+        permissions: { mode: null, label: null, available: false },
+        error: error instanceof Error ? error.message : String(error),
+      };
+    });
+    this.statusInFlight = inFlight;
     try {
-      const value = await this.statusInFlight;
+      const value = await inFlight;
       this.statusSnapshot = { value, capturedAt: Date.now() };
       return value;
     } finally {
-      this.statusInFlight = null;
+      if (this.statusInFlight === inFlight) this.statusInFlight = null;
     }
   }
 
   private async readStatus(): Promise<CdpStatus> {
     try {
       const page = await this.mainPage();
-      const [currentThreadId, stopReady, runningRows, editorReady, approval, permissions] = await Promise.all([
-        this.currentThreadId(page),
-        this.stopButton(page).count().then((count) => count > 0),
-        page.evaluate(() => Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"))
-          .map((row) => ({
-            id: (row.getAttribute("data-app-action-sidebar-thread-id") ?? "").replace(/^local:/, ""),
-            spinning: Boolean(row.querySelector(".animate-spin")),
-            title: (row.textContent ?? "").replace(/\s+/g, " ").trim(),
-          }))
-          .filter((row) => row.id && row.spinning)),
-        page.locator('[contenteditable="true"][role="textbox"]').count().then((count) => count === 1),
-        this.detectDesktopApproval(page),
-        this.permissionStateFromPage(page),
-      ]);
+      const [currentThreadId, stopReady, runningRows, editorReady, approval, permissions] = await withTimeout(
+        Promise.all([
+          this.currentThreadId(page),
+          this.stopButton(page).count().then((count) => count > 0),
+          page.evaluate(() => Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"))
+            .map((row) => ({
+              id: (row.getAttribute("data-app-action-sidebar-thread-id") ?? "").replace(/^local:/, ""),
+              spinning: Boolean(row.querySelector(".animate-spin")),
+              title: (row.textContent ?? "").replace(/\s+/g, " ").trim(),
+            }))
+            .filter((row) => row.id && row.spinning)),
+          page.locator('[contenteditable="true"][role="textbox"]').count().then((count) => count === 1),
+          this.detectDesktopApproval(page),
+          this.permissionStateFromPage(page),
+        ]),
+        3_000,
+        "Reading Codex Desktop controls timed out",
+      );
       const threads = runningRows.some((row) => row.id.startsWith("client-new-thread:"))
         ? await this.sessions.listThreads()
         : [];
@@ -228,6 +299,7 @@ export class CodexCdpController {
         permissions,
       };
     } catch (error) {
+      this.browser = null;
       return {
         connected: false,
         currentThreadId: null,
@@ -381,19 +453,19 @@ export class CodexCdpController {
   private async permissionStateFromPage(page: Page): Promise<CodexPermissionState> {
     const trigger = this.permissionTrigger(page);
     if (await trigger.count() !== 1) return { mode: null, label: null, available: false };
-    const label = (await trigger.innerText().catch(() => "")).replace(/\s+/g, " ").trim() || null;
+    const label = (await trigger.innerText({ timeout: 1_000 }).catch(() => "")).replace(/\s+/g, " ").trim() || null;
     return { mode: permissionModeFromLabel(label), label, available: true };
   }
 
   async setPermissionMode(mode: CodexPermissionMode): Promise<CodexPermissionState> {
-    return this.runExclusive(async () => {
+    return withTimeout(this.runExclusive(async () => {
       const page = await this.mainPage();
       const current = await this.permissionStateFromPage(page);
       if (!current.available) throw new Error("Codex permission control is unavailable");
       if (current.mode === mode) return current;
 
       const trigger = this.permissionTrigger(page);
-      await trigger.click();
+      await trigger.click({ timeout: 2_000 });
       const options = page.locator('[role="menuitem"]:visible');
       await options.first().waitFor({ state: "visible", timeout: 3_000 });
       if (await options.count() < 3) {
@@ -417,14 +489,14 @@ export class CodexCdpController {
       }
 
       const visibleDialogsBefore = await page.locator('[role="dialog"]:visible').count();
-      await option.click();
+      await option.click({ timeout: 2_000 });
       if (mode === "full-access") {
         const dialog = page.locator('[role="dialog"]:visible').last();
         await dialog.waitFor({ state: "visible", timeout: 1_500 }).catch(() => undefined);
         if (await page.locator('[role="dialog"]:visible').count() > visibleDialogsBefore) {
           const confirm = dialog.locator('button:visible:not([disabled])').last();
           if (await confirm.count() !== 1) throw new Error("Codex full access confirmation is unavailable");
-          await confirm.click();
+          await confirm.click({ timeout: 2_000 });
         }
       }
 
@@ -435,7 +507,7 @@ export class CodexCdpController {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       throw new Error("Codex permission mode did not change to the requested value");
-    });
+    }), 15_000, "Changing the Codex permission mode timed out");
   }
 
   private async projectCatalogFromPage(page: Page): Promise<CodexProjectCatalog> {
@@ -716,7 +788,7 @@ export class CodexCdpController {
     const candidate = page.locator('button:visible').filter({ hasText: /^(allow|approve|continue|reject|deny|cancel)(\s|$)/i });
     if (await candidate.count() === 0) return null;
     const button = candidate.first();
-    const label = ((await button.innerText().catch(() => "")) || (await button.getAttribute("aria-label")) || "需要审批").trim();
+    const label = ((await button.innerText({ timeout: 1_000 }).catch(() => "")) || (await button.getAttribute("aria-label")) || "需要审批").trim();
     const threadId = await this.currentThreadId(page);
     if (!threadId) return null;
     return { id: `desktop:${threadId}`, threadId, kind: "approval", title: label, detail: "Codex 桌面端正在等待审批", createdAt: null, source: "desktop" };

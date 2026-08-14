@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { isCodexPermissionMode, isFollowUpMode, permissionModeFromLabel, selectCurrentStreamingText, selectRecentThreadIds, shouldUseAlternateFollowUpShortcut } from "./controller.js";
+import { isCodexPermissionMode, isFollowUpMode, permissionModeFromLabel, selectCurrentStreamingText, selectRecentThreadIds, shouldUseAlternateFollowUpShortcut, withTimeout } from "./controller.js";
+
+describe("withTimeout", () => {
+  it("returns a value when the operation finishes in time", async () => {
+    await expect(withTimeout(Promise.resolve("ready"), 50)).resolves.toBe("ready");
+  });
+
+  it("rejects a stuck operation and does not block a later operation", async () => {
+    await expect(withTimeout(new Promise<never>(() => undefined), 10, "stuck operation")).rejects.toThrow("stuck operation");
+    await expect(withTimeout(Promise.resolve("recovered"), 50)).resolves.toBe("recovered");
+  });
+});
 
 describe("permissionModeFromLabel", () => {
   it.each([

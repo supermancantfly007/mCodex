@@ -9,6 +9,7 @@ SCRIPT_DIRECTORY="${0:A:h}"
 PROJECT_ROOT="${SCRIPT_DIRECTORY:h}"
 ENV_FILE="${MCODEX_ENV_FILE:-${PROJECT_ROOT}/.env.docker}"
 RUN_DIRECTORY="${PROJECT_ROOT}/.run-macos"
+CONTROL_LOCK_DIRECTORY="${RUN_DIRECTORY}/control.lock"
 TUNNEL_PID_FILE="${RUN_DIRECTORY}/tunnel.pid"
 TUNNEL_OUTPUT_LOG="${RUN_DIRECTORY}/tunnel.out.log"
 TUNNEL_ERROR_LOG="${RUN_DIRECTORY}/tunnel.err.log"
@@ -16,10 +17,54 @@ TOKEN_FILE="${RUN_DIRECTORY}/remote-bridge-token"
 DOCKER_TOKEN_FILE="${PROJECT_ROOT}/.run-docker/bridge/remote-bridge-token"
 
 CONFIG_LOADED=false
+CONTROL_LOCK_HELD=false
 
 fail() {
   print -u2 "Error: $1"
   exit 1
+}
+
+release_control_lock() {
+  [[ "$CONTROL_LOCK_HELD" == "true" ]] || return
+  /bin/rm -f "${CONTROL_LOCK_DIRECTORY}/owner.pid" 2>/dev/null || true
+  /bin/rmdir "$CONTROL_LOCK_DIRECTORY" 2>/dev/null || true
+  CONTROL_LOCK_HELD=false
+}
+
+acquire_control_lock() {
+  /bin/mkdir -p "$RUN_DIRECTORY"
+  /bin/chmod 700 "$RUN_DIRECTORY"
+
+  integer attempt=0
+  integer empty_lock_attempts=0
+  while ! /bin/mkdir "$CONTROL_LOCK_DIRECTORY" 2>/dev/null; do
+    local owner_pid=""
+    [[ -f "${CONTROL_LOCK_DIRECTORY}/owner.pid" ]] && owner_pid="$(<"${CONTROL_LOCK_DIRECTORY}/owner.pid")"
+    if [[ "$owner_pid" == <-> ]]; then
+      empty_lock_attempts=0
+      if ! /bin/kill -0 "$owner_pid" 2>/dev/null; then
+        /bin/rm -f "${CONTROL_LOCK_DIRECTORY}/owner.pid" 2>/dev/null || true
+        /bin/rmdir "$CONTROL_LOCK_DIRECTORY" 2>/dev/null || true
+        continue
+      fi
+    else
+      (( empty_lock_attempts += 1 ))
+      if (( empty_lock_attempts >= 10 )); then
+        /bin/rmdir "$CONTROL_LOCK_DIRECTORY" 2>/dev/null || true
+        empty_lock_attempts=0
+        continue
+      fi
+    fi
+
+    (( attempt += 1 ))
+    (( attempt < 300 )) || fail "Timed out waiting for another mCodex control operation to finish."
+    /bin/sleep 0.1
+  done
+
+  print -r -- "$$" >"${CONTROL_LOCK_DIRECTORY}/owner.pid"
+  CONTROL_LOCK_HELD=true
+  trap 'release_control_lock' EXIT
+  trap 'exit 130' HUP INT TERM
 }
 
 config_value() {
@@ -215,6 +260,12 @@ command_name="${1:-up}"
 load_config
 
 case "$command_name" in
+  up|start|ensure|restart-bridge|down|stop)
+    acquire_control_lock
+    ;;
+esac
+
+case "$command_name" in
   up|start)
     start_bridge
     start_tunnel
@@ -224,6 +275,10 @@ case "$command_name" in
       start_bridge
     fi
     start_tunnel
+    ;;
+  restart-bridge)
+    stop_bridge
+    start_bridge
     ;;
   down|stop)
     stop_tunnel
@@ -250,7 +305,7 @@ case "$command_name" in
     [[ -f "$TUNNEL_ERROR_LOG" ]] && /usr/bin/tail -n 40 "$TUNNEL_ERROR_LOG"
     ;;
   *)
-    print -u2 "Usage: $0 [up|down|status|is-running|open|pairing-info|refresh-pairing|logs|ensure]"
+    print -u2 "Usage: $0 [up|down|restart-bridge|status|is-running|open|pairing-info|refresh-pairing|logs|ensure]"
     exit 2
     ;;
 esac

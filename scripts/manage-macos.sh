@@ -84,24 +84,61 @@ recorded_bridge_pid() {
   fi
 }
 
-stop_bridge() {
-  local pid="$(recorded_bridge_pid || true)"
-  if [[ -n "$pid" ]] && /bin/kill -0 "$pid" 2>/dev/null; then
-    local command_line="$(/bin/ps -p "$pid" -o command= 2>/dev/null || true)"
-    if [[ "$command_line" == *"${SERVER_ENTRY}"* ]]; then
-      /bin/kill "$pid"
-      integer attempt=0
-      while /bin/kill -0 "$pid" 2>/dev/null && (( attempt < 50 )); do
-        /bin/sleep 0.1
-        (( attempt += 1 ))
-      done
-      if /bin/kill -0 "$pid" 2>/dev/null; then
-        /bin/kill -KILL "$pid"
-      fi
-      print "Bridge stopped."
-    else
-      print -u2 "Ignoring stale Bridge PID ${pid}; its command does not belong to mCodex."
+bridge_process_belongs_to_project() {
+  local pid="$1"
+  [[ "$pid" == <-> ]] || return 1
+  /bin/kill -0 "$pid" 2>/dev/null || return 1
+
+  local command_line="$(/bin/ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command_line" == *"${SERVER_ENTRY}"* ]] || return 1
+
+  local process_cwd="$(/usr/sbin/lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | /usr/bin/sed -n 's/^n//p' | /usr/bin/head -n 1)"
+  [[ "$process_cwd" == "$PROJECT_ROOT" ]]
+}
+
+listening_bridge_pid() {
+  local -a listener_pids
+  listener_pids=("${(@f)$(/usr/sbin/lsof -nP -tiTCP:"${BRIDGE_PORT}" -sTCP:LISTEN 2>/dev/null || true)}")
+  local pid
+  for pid in "${listener_pids[@]}"; do
+    if bridge_process_belongs_to_project "$pid"; then
+      print -r -- "$pid"
+      return 0
     fi
+  done
+  return 1
+}
+
+effective_bridge_pid() {
+  local pid="$(recorded_bridge_pid || true)"
+  if [[ -n "$pid" ]] && bridge_process_belongs_to_project "$pid"; then
+    print -r -- "$pid"
+    return 0
+  fi
+
+  pid="$(listening_bridge_pid || true)"
+  [[ -n "$pid" ]] || return 1
+  /bin/mkdir -p "$RUN_LOG_DIRECTORY"
+  print -r -- "$pid" >"$BRIDGE_PID_FILE"
+  print -r -- "$pid"
+}
+
+stop_bridge() {
+  local recorded_pid="$(recorded_bridge_pid || true)"
+  local pid="$(effective_bridge_pid || true)"
+  if [[ -n "$pid" ]]; then
+    /bin/kill "$pid"
+    integer attempt=0
+    while /bin/kill -0 "$pid" 2>/dev/null && (( attempt < 50 )); do
+      /bin/sleep 0.1
+      (( attempt += 1 ))
+    done
+    if /bin/kill -0 "$pid" 2>/dev/null; then
+      /bin/kill -KILL "$pid"
+    fi
+    print "Bridge stopped."
+  elif [[ -n "$recorded_pid" ]]; then
+    print -u2 "Ignoring stale Bridge PID ${recorded_pid}; it does not belong to this mCodex project."
   fi
   /bin/rm -f "$BRIDGE_PID_FILE"
   /bin/rm -f "$BRIDGE_MODE_FILE"
@@ -116,6 +153,8 @@ start_bridge() {
   [[ -f "$BRIDGE_MODE_FILE" ]] && current_mode="$(<"$BRIDGE_MODE_FILE")"
 
   if [[ -n "$current_health" && "$current_mode" == "$requested_mode" ]]; then
+    local active_pid="$(effective_bridge_pid || true)"
+    [[ -n "$active_pid" ]] || fail "Port ${BRIDGE_PORT} is responding, but its listener does not belong to this mCodex project."
     if [[ "$external_access" != "true" || "$current_health" == *'"authRequired":true'* ]]; then
       print "Bridge is already online: http://127.0.0.1:${BRIDGE_PORT}"
       return
@@ -124,6 +163,7 @@ start_bridge() {
   if [[ -n "$current_health" ]]; then
     print "Restarting Bridge with the requested access mode..."
     stop_bridge
+    bridge_health >/dev/null 2>&1 && fail "Port ${BRIDGE_PORT} is still occupied by a service that does not belong to this mCodex project."
   fi
 
   /bin/mkdir -p "$RUN_LOG_DIRECTORY"

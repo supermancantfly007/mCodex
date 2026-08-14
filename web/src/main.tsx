@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { QRCodeSVG } from "qrcode.react";
 import { createClientMessageId } from "./client-id";
+import { applyDesktopRuntime } from "./desktop-runtime";
 import { buildDesktopTimeline, rollbackTimelineItems, shouldShowThinking, type DesktopDisplayItem, type TimelineActivityFile } from "./timeline";
 import "./styles.css";
 
@@ -232,16 +233,6 @@ function isActivelyRunning(thread: Thread, _desktopThreadId: string | null = nul
   return thread.status === "running";
 }
 
-function applyDesktopRuntime(threads: Thread[], status: DesktopState): Thread[] {
-  if (!status.connected || !Array.isArray(status.runningThreadIds)) return threads;
-  const running = new Set(status.runningThreadIds.filter((id) => typeof id === "string" && id && !id.startsWith("client-new-thread:")));
-  return threads.map((thread) => {
-    if (running.has(thread.id)) return thread.status === "running" ? thread : { ...thread, status: "running" };
-    // Only demote session-running tasks that desktop no longer reports as active.
-    return thread.status === "running" ? { ...thread, status: "interrupted" } : thread;
-  });
-}
-
 function App() {
   const [locale, setLocaleState] = useState<Locale>(activeLocale);
   activeLocale = locale;
@@ -366,8 +357,8 @@ function App() {
   async function refreshProjects(showError = false) {
     try {
       const result = await api<{ projects: Project[]; recentThreadIds?: string[] }>("/api/projects");
-      setProjects(result.projects);
-      setRecentThreadIds(result.recentThreadIds ?? []);
+      setProjects(Array.isArray(result.projects) ? result.projects : []);
+      setRecentThreadIds(Array.isArray(result.recentThreadIds) ? result.recentThreadIds : []);
     } catch (cause) {
       if (showError) setError(friendlyError(cause));
     }

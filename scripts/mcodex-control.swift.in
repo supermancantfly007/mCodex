@@ -183,9 +183,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func startServices() {
+        ensuringServices = true
+        lastEnsureAt = Date()
         statusLabel.stringValue = "正在启动…"
         runManager("up") { [weak self] result in
             guard let self else { return }
+            self.ensuringServices = false
+            self.lastEnsureAt = Date()
             switch result {
             case .success:
                 self.statusLabel.textColor = .systemGreen
