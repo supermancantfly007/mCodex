@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowLeft, Ban, Bot, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Clock3, Folder, FolderPlus, FolderSearch, Hand, ImagePlus, Languages, LoaderCircle, PlugZap, Plus, RefreshCw, Search, Send, ShieldAlert, Square, SquarePen, Terminal, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, Ban, Bot, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Clock3, Folder, FolderPlus, FolderSearch, Hand, ImagePlus, Languages, LoaderCircle, PlugZap, Plus, RefreshCw, Search, Send, ShieldAlert, Square, SquarePen, Terminal, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { QRCodeSVG } from "qrcode.react";
 import { createClientMessageId } from "./client-id";
 import { applyDesktopRuntime } from "./desktop-runtime";
+import { normalizeStoredThreadId, resolveStoredThreadId, selectedThreadStorageKey, shouldShowJumpToLatest } from "./thread-view";
 import { buildDesktopTimeline, rollbackTimelineItems, shouldShowThinking, type DesktopDisplayItem, type TimelineActivityFile } from "./timeline";
 import "./styles.css";
 
@@ -44,7 +45,7 @@ const translations: Record<string, string> = {
   "Codex 远程控制": "Codex Remote Control", "本地任务工作台": "Local task workspace", "新建任务": "New task", "创建项目": "Create project", "刷新任务": "Refresh tasks",
   "正在连接": "Connecting", "实时连接": "Live connection", "连接断开": "Disconnected", "连接控制": "Control connection", "可控制": "Controllable", "只读": "Read-only", "搜索任务": "Search tasks",
   "折叠 {name}": "Collapse {name}", "展开 {name}": "Expand {name}", "在 {name} 中新建任务": "New task in {name}", "暂无摘要": "No summary", "暂无任务": "No tasks", "最近": "Recent", "展开或折叠最近任务": "Expand or collapse recent tasks", "新建普通对话": "New conversation", "没有找到相关任务": "No matching tasks",
-  "返回任务列表": "Back to task list", "停止任务": "Stop task", "停止": "Stop", "批准": "Approve", "拒绝": "Reject", "正在加载对话": "Loading conversation", "正在思考": "Thinking", "更改 Desktop 权限": "Change Desktop permissions", "Desktop 权限暂不可用": "Desktop permissions unavailable", "添加图片": "Attach image", "移除 {name}": "Remove {name}", "正在连接当前任务的控制…": "Connecting to task controls…", "正在发送，请稍候…": "Sending, please wait…", "正在连接桌面控制…": "Connecting to Desktop controls…", "向当前任务发送消息": "Send a message to the current task", "桌面控制尚未连接，当前为只读模式": "Desktop controls are not connected; read-only mode", "正在发送": "Sending", "发送": "Send",
+  "返回任务列表": "Back to task list", "停止任务": "Stop task", "停止": "Stop", "批准": "Approve", "拒绝": "Reject", "正在加载对话": "Loading conversation", "正在思考": "Thinking", "最新消息": "Latest", "跳到最新消息": "Jump to latest message", "更改 Desktop 权限": "Change Desktop permissions", "Desktop 权限暂不可用": "Desktop permissions unavailable", "添加图片": "Attach image", "移除 {name}": "Remove {name}", "正在连接当前任务的控制…": "Connecting to task controls…", "正在发送，请稍候…": "Sending, please wait…", "正在连接桌面控制…": "Connecting to Desktop controls…", "向当前任务发送消息": "Send a message to the current task", "桌面控制尚未连接，当前为只读模式": "Desktop controls are not connected; read-only mode", "正在发送": "Sending", "发送": "Send",
   "连接这台电脑": "Connect this computer", "选择一个任务": "Select a task", "正在验证并加载任务，请稍候…": "Verifying and loading tasks…", "手机与电脑连接同一 Wi-Fi 后，可扫码或输入配对码。": "Connect your phone and computer to the same Wi-Fi, then scan or enter the pairing code.", "任务进度会从本地会话文件实时同步。": "Task progress is synced from local session files.", "用手机扫码使用": "Scan with your phone", "打开手机相机扫描二维码，将自动连接这台电脑。": "Scan this QR code with your phone camera to connect automatically.", "配对码": "Pairing code", "手机扫码连接": "Connect by phone", "开始配对": "Pair", "正在配对": "Pairing",
   "配对尝试次数过多，请在 Mac 的 mCodex Control 中刷新配对码": "Too many pairing attempts. Refresh the code in mCodex Control on your Mac.",
   "请求超时，请检查连接后重试": "The request timed out. Check the connection and try again",
@@ -272,10 +273,12 @@ function App() {
   const [projectName, setProjectName] = useState("");
   const [projectPath, setProjectPath] = useState("");
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(initialExpandedGroups);
   const timelineRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<string | null>(null);
+  const pendingThreadRestoreRef = useRef<string | null>(normalizeStoredThreadId(localStorage.getItem(selectedThreadStorageKey)));
   const openRequestRef = useRef(0);
   const lastAutoExpandedRef = useRef("");
 
@@ -339,13 +342,21 @@ function App() {
   async function refreshThreads() {
     try {
       const { threads: next, cdp } = await api<{ threads: Thread[]; cdp?: DesktopState }>("/api/threads");
-      setThreads(applyDesktopRuntime(next, cdp ?? {}));
+      const reconciledThreads = applyDesktopRuntime(next, cdp ?? {});
+      setThreads(reconciledThreads);
       setCdpReady(Boolean(cdp?.connected && cdp?.editorReady));
       setDesktopThreadId(cdp?.currentThreadId ?? null);
       setDesktopApproval(cdp?.approval ?? null);
       setDesktopPermissions(cdp?.permissions ?? { mode: null, label: null, available: false });
       setNeedsPairing(false);
       setError("");
+      const pendingThreadId = pendingThreadRestoreRef.current;
+      if (pendingThreadId) {
+        pendingThreadRestoreRef.current = null;
+        const restoredThreadId = resolveStoredThreadId(pendingThreadId, reconciledThreads);
+        if (restoredThreadId) void openThread(restoredThreadId);
+        else localStorage.removeItem(selectedThreadStorageKey);
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       const unauthorized = /unauthorized/i.test(message);
@@ -374,7 +385,11 @@ function App() {
 
   async function openThread(id: string, syncDesktop = true) {
     const requestId = ++openRequestRef.current;
+    pendingThreadRestoreRef.current = null;
+    localStorage.setItem(selectedThreadStorageKey, id);
+    selectedRef.current = id;
     setSelected(id);
+    setShowJumpToLatest(false);
     setSwitchingThread(syncDesktop);
     setTimelineLoading(true);
     setItems([]);
@@ -404,6 +419,28 @@ function App() {
     } finally {
       if (requestId === openRequestRef.current) setSwitchingThread(false);
     }
+  }
+
+  function closeThread() {
+    openRequestRef.current += 1;
+    pendingThreadRestoreRef.current = null;
+    localStorage.removeItem(selectedThreadStorageKey);
+    selectedRef.current = null;
+    setSelected(null);
+    setShowJumpToLatest(false);
+  }
+
+  function updateTimelinePosition() {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    setShowJumpToLatest(shouldShowJumpToLatest(timeline));
+  }
+
+  function jumpToLatest() {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    timeline.scrollTo({ top: timeline.scrollHeight, behavior });
   }
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
@@ -534,13 +571,11 @@ function App() {
     };
   }, [authEpoch]);
   useEffect(() => {
-    if (selected && desktopThreadId && selected !== desktopThreadId && !switchingThread && !sending && !controlBusy && !dialogBusy) {
-      void openThread(desktopThreadId, false);
-    }
-  }, [desktopThreadId]);
-  useEffect(() => {
     const timeline = timelineRef.current;
-    if (timeline) timeline.scrollTop = timeline.scrollHeight;
+    if (timeline) {
+      timeline.scrollTop = timeline.scrollHeight;
+      setShowJumpToLatest(false);
+    }
   }, [items, streamingOutput?.text]);
 
   function addImages(files: File[]) {
@@ -750,8 +785,9 @@ function App() {
     </aside>
     <section className="workspace">
       {selectedThread ? <>
-        <header className="thread-header"><button className="icon-button mobile-back" onClick={() => setSelected(null)} title={t("返回任务列表")}><ArrowLeft size={20} /></button><div><h1>{selectedThread.title}</h1><p>{selectedThread.cwd}</p></div><span className={`status-chip ${selectedThread.status}`}>{selectedThread.status === "running" ? <Activity size={14} /> : selectedThread.status === "waiting_approval" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{t(statusLabel[selectedThread.status])}</span>{approvalVisible && <div className="thread-actions"><button className="control-button approve" onClick={() => void control("approval", { decision: "approve" })} disabled={controlBusy || switchingThread} title={t("批准")}><Check size={16} />{t("批准")}</button><button className="control-button reject" onClick={() => void control("approval", { decision: "reject" })} disabled={controlBusy || switchingThread} title={t("拒绝")}><X size={16} />{t("拒绝")}</button></div>}</header>
-        <div className="timeline" ref={timelineRef}>
+        <header className="thread-header"><button className="icon-button mobile-back" onClick={closeThread} title={t("返回任务列表")}><ArrowLeft size={20} /></button><div><h1>{selectedThread.title}</h1><p>{selectedThread.cwd}</p></div><span className={`status-chip ${selectedThread.status}`}>{selectedThread.status === "running" ? <Activity size={14} /> : selectedThread.status === "waiting_approval" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{t(statusLabel[selectedThread.status])}</span>{approvalVisible && <div className="thread-actions"><button className="control-button approve" onClick={() => void control("approval", { decision: "approve" })} disabled={controlBusy || switchingThread} title={t("批准")}><Check size={16} />{t("批准")}</button><button className="control-button reject" onClick={() => void control("approval", { decision: "reject" })} disabled={controlBusy || switchingThread} title={t("拒绝")}><X size={16} />{t("拒绝")}</button></div>}</header>
+        <div className="timeline-shell">
+        <div className="timeline" ref={timelineRef} onScroll={updateTimelinePosition}>
           {timelineLoading && <div className="timeline-loading" role="status"><LoaderCircle className="spin" size={18} />{t("正在加载对话")}</div>}
           {displayItems.map((display) => {
             if (display.type === "reasoning") return <div key={display.item.id} className={`progress-event${isActivelyRunning(selectedThread, desktopThreadId) ? " active" : ""}`}>{display.item.text}</div>;
@@ -770,6 +806,8 @@ function App() {
           })}
           {thinking && <div className="progress-event active" role="status" aria-live="polite">{t("正在思考")}</div>}
           {liveOutput && <article className="assistant-message markdown-body streaming-message"><MarkdownText text={liveOutput} /><span className="stream-caret" aria-hidden="true" /></article>}
+        </div>
+        {showJumpToLatest && <button className="jump-latest-button" type="button" onClick={jumpToLatest} title={t("跳到最新消息")} aria-label={t("跳到最新消息")}><ArrowDown size={15} /><span>{t("最新消息")}</span></button>}
         </div>
         {error && <div className="error-bar"><CircleAlert size={16} />{error}</div>}
         <footer className="composer">

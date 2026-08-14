@@ -227,6 +227,15 @@ button { color: inherit; }
   background: #ffffff;
 }
 
+.timeline-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
 .thread-header {
   min-height: 64px;
   padding: 10px 20px;
@@ -282,6 +291,7 @@ button { color: inherit; }
 .control-button.approve { border-color: #bad3c5; color: #286749; }
 
 .timeline {
+  width: 100%;
   min-height: 0;
   flex: 1;
   overflow-y: auto;
@@ -291,6 +301,30 @@ button { color: inherit; }
   padding: 24px max(22px, calc((100% - 820px) / 2)) 32px;
   background: #ffffff;
 }
+
+.jump-latest-button {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 4;
+  min-height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  border: 1px solid #cfd1cb;
+  border-radius: 18px;
+  background: #ffffffee;
+  box-shadow: 0 5px 18px #20211f1f;
+  color: #50534d;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.jump-latest-button:hover { border-color: #aeb1aa; background: #ffffff; color: #252623; }
+.jump-latest-button:focus-visible { outline: 2px solid #39745b; outline-offset: 2px; }
 
 .timeline-loading {
   min-height: 72px;
