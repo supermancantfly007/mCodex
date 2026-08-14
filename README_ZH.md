@@ -60,9 +60,10 @@ cp .env.docker.example .env.docker
 第一次使用时，等 Codex 中的任务结束后，用 `Command-Q` 完全退出 Codex Desktop，再执行：
 
 ```zsh
-./scripts/manage-macos.sh cdp      # 原生启动 Codex，控制端口仅监听 127.0.0.1:9222
-./scripts/manage-docker.sh up      # 构建并启动 Bridge；启用 VPS 时也会启动隧道 sidecar
+./scripts/manage-docker.sh up
 ```
+
+`up` 会先检查并按需原生启动 Codex，控制端口仅监听 `127.0.0.1:9222`，随后构建并启动 Bridge；启用 VPS 时也会启动隧道 sidecar。如果 Codex 正在运行但没有控制通道，脚本会安全退出并提示你先结束任务、完全退出 Codex，不会强制关闭它。
 
 之后用以下命令启停即可。`down` 只停止 mCodex 与隧道容器，不会退出 Codex Desktop，也不会终止 Codex 任务：
 
@@ -75,6 +76,8 @@ cp .env.docker.example .env.docker
 ```
 
 `.env.docker` 包含本机路径和可选的 VPS 信息，已被 Git 忽略，不要提交。Bridge 只发布到 Mac 的 `127.0.0.1:3210`；容器通过 `host.docker.internal` 连接 Codex 的本地控制端口。
+
+Docker Desktop 的 Start 按钮只能启动容器，不能执行 Mac 宿主机命令，因此无法自行拉起 Codex App。需要自动处理 Codex CDP 时请使用上面的 `manage-docker.sh up`；如果 Codex 已处于 CDP 模式，也可以直接在 Docker Desktop 中启停容器。
 
 ## 手机连接
 

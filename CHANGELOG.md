@@ -12,6 +12,7 @@
 ### Changed
 
 - macOS 推荐启动方式改为 Docker Compose；原宿主机 Node 与 LaunchAgent 隧道模板仅为已有部署保留
+- `manage-docker.sh up/restart` 会先检查并按需启动 macOS Codex CDP，不再要求单独执行 CDP 命令
 
 ### Security
 

@@ -27,6 +27,11 @@ ensure_env() {
   /bin/chmod 700 .run-docker .run-docker/bridge .run-docker/tunnel
 }
 
+ensure_cdp() {
+  [[ "$(/usr/bin/uname -s)" == "Darwin" ]] || fail "Automatic Codex CDP startup is supported only on macOS."
+  "${SCRIPT_DIRECTORY}/manage-macos.sh" cdp
+}
+
 vps_enabled() {
   /usr/bin/grep -Eq '^MCODEX_VPS_ENABLED=(true|1|yes)$' "$ENV_FILE"
 }
@@ -45,12 +50,14 @@ ensure_env
 
 case "$command_name" in
   up|start)
+    ensure_cdp
     compose up -d --build
     ;;
   down|stop)
     compose down
     ;;
   restart)
+    ensure_cdp
     compose restart
     ;;
   build)

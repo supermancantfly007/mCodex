@@ -48,11 +48,10 @@ MCODEX_VPS_SSH_KEY=/Users/you/.ssh/mcodex-tunnel
 SSH 私钥应设为 `600`。第一次使用本地控制通道时，先等 Codex 当前任务结束，再用 `Command-Q` 完全退出 Codex Desktop，然后运行：
 
 ```zsh
-./scripts/manage-macos.sh cdp
 ./scripts/manage-docker.sh up
 ```
 
-`manage-macos.sh cdp` 只负责原生启动 Codex 控制通道；Bridge 与隧道均由 Compose 管理。日常命令：
+`manage-docker.sh up` 会先检查并按需原生启动 Codex 控制通道，再由 Compose 启动 Bridge 与隧道。如果 Codex 正在运行但没有控制通道，脚本不会强制退出它，而是提示等待当前任务结束后手工完全退出。日常命令：
 
 ```zsh
 ./scripts/manage-docker.sh status
@@ -63,6 +62,8 @@ SSH 私钥应设为 `600`。第一次使用本地控制通道时，先等 Codex 
 ```
 
 `down` 不会退出 Codex Desktop，也不会停止正在执行的 Codex 任务。
+
+Docker Desktop 的 Start 按钮不能执行 Mac 宿主机命令。需要自动拉起 Codex CDP 时必须使用 `manage-docker.sh up`；Codex 已处于 CDP 模式时才可直接用 Docker Desktop 启停。
 
 ## 2. 限制 VPS 上的 SSH 隧道
 

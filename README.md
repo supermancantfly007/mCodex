@@ -60,11 +60,14 @@ cp .env.docker.example .env.docker
 For the first run, wait until any active Codex task finishes, fully quit Codex Desktop with `Command-Q`, then run:
 
 ```zsh
-./scripts/manage-macos.sh cdp      # Native Codex; control stays on 127.0.0.1:9222
-./scripts/manage-docker.sh up      # Build and start the Bridge and optional VPS sidecar
+./scripts/manage-docker.sh up
 ```
 
+`up` first checks and, when needed, launches native Codex with its control channel bound only to `127.0.0.1:9222`; it then builds and starts the Bridge and optional VPS sidecar. If Codex is already running without that channel, the script exits safely and asks you to finish the task and fully quit Codex—it never force-quits the app.
+
 Use `manage-docker.sh status`, `logs`, `restart`, `down`, and `open` for day-to-day control. `down` stops only the mCodex and tunnel containers; it does not quit Codex Desktop or stop a Codex task. `.env.docker` is ignored by Git and must remain private. The Bridge is published only on `127.0.0.1:3210`, while the container reaches Codex through `host.docker.internal`.
+
+Docker Desktop's Start button can only start containers and cannot execute a macOS host command, so it cannot launch the Codex app itself. Use `manage-docker.sh up` when CDP should be handled automatically; direct Docker Desktop controls work when Codex is already running in CDP mode.
 
 ## Connect your phone
 
