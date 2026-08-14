@@ -1,0 +1,66 @@
+property projectPath : "__MCODEX_PROJECT_ROOT__"
+property commandPath : "/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+on run
+	set shellPrefix to "export PATH=" & quoted form of commandPath & "; cd " & quoted form of projectPath & "; "
+	set mcodexRunning to false
+
+	try
+		set containerState to do shell script shellPrefix & "docker inspect -f '{{.State.Running}}' mcodex 2>/dev/null || true"
+		if containerState is "true" then set mcodexRunning to true
+	on error
+		set mcodexRunning to false
+	end try
+
+	if mcodexRunning then
+		try
+			do shell script shellPrefix & "./scripts/manage-docker.sh down 2>&1"
+			display notification "mCodex 与 VPS 隧道已停止；Codex Desktop 保持运行。" with title "mCodex"
+		on error errorMessage number errorNumber
+			my showFailure("停止失败", errorMessage, errorNumber)
+		end try
+		return
+	end if
+
+	try
+		my ensureDocker(shellPrefix)
+		do shell script shellPrefix & "./scripts/manage-docker.sh up 2>&1"
+		display notification "mCodex、Codex CDP 与 VPS 隧道已启动。" with title "mCodex"
+	on error errorMessage number errorNumber
+		my showFailure("启动失败", errorMessage, errorNumber)
+	end try
+end run
+
+on ensureDocker(shellPrefix)
+	try
+		do shell script shellPrefix & "docker info >/dev/null 2>&1"
+		return
+	on error
+		try
+			do shell script "/usr/bin/open -gj -a Docker"
+		on error
+			error "无法打开 Docker Desktop。请确认 /Applications/Docker.app 已安装。" number 2
+		end try
+	end try
+
+	set dockerReady to false
+	repeat with attemptIndex from 1 to 120
+		delay 1
+		try
+			do shell script shellPrefix & "docker info >/dev/null 2>&1"
+			set dockerReady to true
+			exit repeat
+		on error
+			-- Docker Desktop is still starting.
+		end try
+	end repeat
+
+	if dockerReady is false then error "Docker Desktop 在 120 秒内没有启动完成。" number 3
+end ensureDocker
+
+on showFailure(actionName, errorMessage, errorNumber)
+	set displayMessage to errorMessage
+	if (length of displayMessage) > 1600 then set displayMessage to text -1600 thru -1 of displayMessage
+	activate
+	display dialog actionName & "（错误 " & errorNumber & "）" & return & return & displayMessage buttons {"确定"} default button "确定" with icon stop
+end showFailure

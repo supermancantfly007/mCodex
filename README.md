@@ -69,6 +69,14 @@ Use `manage-docker.sh status`, `logs`, `restart`, `down`, and `open` for day-to-
 
 Docker Desktop's Start button can only start containers and cannot execute a macOS host command, so it cannot launch the Codex app itself. Use `manage-docker.sh up` when CDP should be handled automatically; direct Docker Desktop controls work when Codex is already running in CDP mode.
 
+For terminal-free control, install the macOS app once:
+
+```zsh
+./scripts/install-macos-control-app.sh
+```
+
+It is installed as `~/Applications/mCodex Control.app`. Drag it to the Dock: one click starts Docker Desktop, Codex CDP, the Bridge, and the VPS tunnel; the next click stops only the Bridge and tunnel without quitting Codex Desktop.
+
 ## Connect your phone
 
 ### On the same network

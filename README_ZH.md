@@ -79,6 +79,14 @@ cp .env.docker.example .env.docker
 
 Docker Desktop 的 Start 按钮只能启动容器，不能执行 Mac 宿主机命令，因此无法自行拉起 Codex App。需要自动处理 Codex CDP 时请使用上面的 `manage-docker.sh up`；如果 Codex 已处于 CDP 模式，也可以直接在 Docker Desktop 中启停容器。
 
+不想使用终端时，可以安装 macOS 控制 App：
+
+```zsh
+./scripts/install-macos-control-app.sh
+```
+
+安装位置为 `~/Applications/mCodex Control.app`。把它拖到 Dock 后，点击一次会自动启动 Docker Desktop、Codex CDP、Bridge 和 VPS 隧道；再次点击只停止 Bridge 与隧道，不退出 Codex Desktop。安装是一次性的，之后无需再执行终端命令。
+
 ## 手机连接
 
 ### 同一网络

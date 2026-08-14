@@ -39,7 +39,8 @@ jobs:
       - name: Validate macOS launchers and deployment examples
         if: runner.os == 'macOS'
         run: |
-          zsh -n scripts/manage-macos.sh scripts/start-codex-cdp-macos.sh deploy/examples/start-public-tunnel.sh.example
+          zsh -n scripts/manage-macos.sh scripts/start-codex-cdp-macos.sh scripts/manage-docker.sh scripts/install-macos-control-app.sh deploy/examples/start-public-tunnel.sh.example
+          osacompile -o "$RUNNER_TEMP/mCodex Control.app" scripts/mcodex-control.applescript.in
           plutil -lint deploy/examples/com.mcodex.public-tunnel.plist.example
 
       - name: Audit production dependencies
