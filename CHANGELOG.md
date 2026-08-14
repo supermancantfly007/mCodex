@@ -8,11 +8,11 @@
 - 增加 Windows/macOS 任务深链平台适配及自动化测试
 - 增加 VPS Caddy、SSH 反向隧道、Cloudflare Access 和 LaunchAgent 公网部署模板
 - 增加 macOS Docker Compose 启动方式，将 Bridge/Web 与 SSH 反向隧道作为本地容器统一启停
-- 增加可安装到 Dock 的 macOS 控制 App，自动启动 Docker Desktop 和 Codex CDP，并一键启停 Bridge 与 VPS 隧道
+- 增加原生常驻 macOS 控制 App，不依赖 Docker，直接管理 Bridge 与 SSH 隧道，并显示、手动刷新和自动轮换配对码
 
 ### Changed
 
-- macOS 推荐启动方式改为 Docker Compose；原宿主机 Node 与 LaunchAgent 隧道模板仅为已有部署保留
+- macOS 推荐启动方式改为原生控制 App；Docker Compose 作为可选运行方式保留
 - `manage-docker.sh up/restart` 会先检查并按需启动 macOS Codex CDP，不再要求单独执行 CDP 命令
 
 ### Security

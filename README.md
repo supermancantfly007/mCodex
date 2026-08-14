@@ -46,9 +46,9 @@ cd mCodex
 
 `manage.bat` checks dependencies, builds the project, starts Codex Desktop with local control enabled, starts mCodex, and opens the local page.
 
-### 4. macOS + Docker (experimental)
+### 4. macOS native control app (experimental)
 
-Requires macOS 12+, the official Codex Desktop app, and Docker Desktop. The Bridge, web UI, and optional SSH tunnel run in local containers, so mCodex does not require Node.js on the Mac host:
+Requires macOS 13+, the official Codex Desktop app, Node.js 20.19+ or 22.12+, and Xcode Command Line Tools. Docker Desktop is optional and is not used by the native control app:
 
 ```zsh
 git clone https://github.com/supermancantfly007/mCodex.git
@@ -57,25 +57,23 @@ cp .env.docker.example .env.docker
 # Edit .env.docker and set at least the Codex home and projects root.
 ```
 
-For the first run, wait until any active Codex task finishes, fully quit Codex Desktop with `Command-Q`, then run:
-
-```zsh
-./scripts/manage-docker.sh up
-```
-
-`up` first checks and, when needed, launches native Codex with its control channel bound only to `127.0.0.1:9222`; it then builds and starts the Bridge and optional VPS sidecar. If Codex is already running without that channel, the script exits safely and asks you to finish the task and fully quit Codex—it never force-quits the app.
-
-Use `manage-docker.sh status`, `logs`, `restart`, `down`, and `open` for day-to-day control. `down` stops only the mCodex and tunnel containers; it does not quit Codex Desktop or stop a Codex task. `.env.docker` is ignored by Git and must remain private. The Bridge is published only on `127.0.0.1:3210`, while the container reaches Codex through `host.docker.internal`.
-
-Docker Desktop's Start button can only start containers and cannot execute a macOS host command, so it cannot launch the Codex app itself. Use `manage-docker.sh up` when CDP should be handled automatically; direct Docker Desktop controls work when Codex is already running in CDP mode.
-
-For terminal-free control, install the macOS app once:
+The recommended macOS experience is the native control app. Install it once:
 
 ```zsh
 ./scripts/install-macos-control-app.sh
 ```
 
-It is installed as `~/Applications/mCodex Control.app`. Drag it to the Dock: one click starts Docker Desktop, Codex CDP, the Bridge, and the VPS tunnel; the next click stops only the Bridge and tunnel without quitting Codex Desktop.
+It is installed as `~/Applications/mCodex Control.app`. Open it or drag it to the Dock. The app stays open, runs the Bridge and SSH tunnel directly on macOS without Docker, shows the current pairing code and countdown, and automatically rotates an expired code. Closing the window, choosing **Stop and Quit**, or pressing `Command-Q` stops only the Bridge and tunnel; Codex Desktop remains open.
+
+On the first run, if Codex Desktop is already open without its loopback control channel, finish any active task and fully quit it once with `Command-Q`; the control app will relaunch it correctly. `.env.docker` is ignored by Git and is reused as the private native-app configuration for local paths and optional VPS tunnel settings.
+
+Docker Compose remains an optional alternative for users who prefer containers:
+
+```zsh
+./scripts/manage-docker.sh up
+```
+
+Do not run the native app and Docker deployment at the same time; both use local port `3210`.
 
 ## Connect your phone
 
@@ -85,11 +83,11 @@ It is installed as `~/Applications/mCodex Control.app`. Drag it to the Dock: one
 2. Connect the phone and PC to the same Wi-Fi or network.
 3. Scan the QR code on the PC page, or open the displayed address and enter the pairing code.
 
-The pairing code is valid for 10 minutes. After pairing, the device stays trusted until the saved token is revoked.
+The pairing code is valid for 10 minutes and the native app rotates it automatically. After pairing, the device stays trusted until the saved token is revoked.
 
 ### Remote access
 
-You do not need Tailscale or another private-network client. A normal HTTPS endpoint can be built with VPS Caddy, an SSH reverse tunnel, and Cloudflare Access. On macOS, the Docker Compose VPS profile manages the reverse-tunnel sidecar together with the Bridge; see the [Chinese VPS deployment guide](deploy/README_ZH.md). Only forward the mCodex service on port `3210`; never expose the Codex control port `9222`.
+You do not need Tailscale or another private-network client. A normal HTTPS endpoint can be built with VPS Caddy, an SSH reverse tunnel, and Cloudflare Access. On macOS, the native control app manages the Bridge and reverse tunnel together; see the [Chinese VPS deployment guide](deploy/README_ZH.md). Only forward the mCodex service on port `3210`; never expose the Codex control port `9222`.
 
 ## What you can do
 
@@ -121,17 +119,17 @@ You do not need Tailscale or another private-network client. A normal HTTPS endp
 
 ## Requirements
 
-- Windows 10/11, or experimentally macOS 12+
+- Windows 10/11, or experimentally macOS 13+
 - Microsoft Store Codex Desktop on Windows, or the official Codex Desktop app on macOS
 - A modern browser on the phone or another device
-- Node.js for the Windows source workflow; the macOS Docker workflow does not require host Node.js
+- Node.js 20.19+ or 22.12+ for source workflows; the native macOS app installer also requires Xcode Command Line Tools
 
 ## Important security notes
 
 - Keep pairing enabled and protect any address exposed through a tunneling service.
 - Never expose or forward the Codex CDP port `9222`.
 - mCodex does not provide a public relay, user accounts, or multi-user isolation.
-- Put an independent identity layer such as Cloudflare Access in front of public domains and block proxy access to `/api/pairing-info`.
+- Put an independent identity layer such as Cloudflare Access in front of public domains and block proxy access to `/api/pairing-info` and `/api/pairing-refresh`.
 - Third-party tunneling and remote-network tools are supported as connection options but remain outside the project's security and availability responsibility.
 
 See [SECURITY.md](SECURITY.md) for the full security policy.

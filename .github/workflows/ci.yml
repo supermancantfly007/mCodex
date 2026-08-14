@@ -39,8 +39,11 @@ jobs:
       - name: Validate macOS launchers and deployment examples
         if: runner.os == 'macOS'
         run: |
-          zsh -n scripts/manage-macos.sh scripts/start-codex-cdp-macos.sh scripts/manage-docker.sh scripts/install-macos-control-app.sh deploy/examples/start-public-tunnel.sh.example
-          osacompile -o "$RUNNER_TEMP/mCodex Control.app" scripts/mcodex-control.applescript.in
+          zsh -n scripts/manage-macos.sh scripts/manage-native-macos.sh scripts/start-codex-cdp-macos.sh scripts/manage-docker.sh scripts/install-macos-control-app.sh deploy/examples/start-public-tunnel.sh.example
+          cp scripts/mcodex-control.swift.in "$RUNNER_TEMP/mcodex-control.swift"
+          xcrun swiftc -parse-as-library -typecheck -framework AppKit "$RUNNER_TEMP/mcodex-control.swift"
+          plutil -lint scripts/mcodex-control-Info.plist
+          if grep -q 'manage-docker\|Docker.app' scripts/mcodex-control.swift.in; then exit 1; fi
           plutil -lint deploy/examples/com.mcodex.public-tunnel.plist.example
 
       - name: Audit production dependencies

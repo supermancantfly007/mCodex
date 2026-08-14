@@ -46,9 +46,9 @@ cd mCodex
 
 `manage.bat` 会检查依赖、构建项目、以本地控制模式启动 Codex Desktop、启动 mCodex，并自动打开电脑端页面。
 
-### 4. macOS + Docker（实验支持）
+### 4. macOS 原生控制 App（实验支持）
 
-需要 macOS 12+、官方 Codex Desktop 和 Docker Desktop。Bridge、Web 界面及可选的 SSH 隧道均在本地 Docker 中运行，Mac 宿主机无需为 mCodex 安装 Node.js：
+需要 macOS 13+、官方 Codex Desktop、Node.js 20.19+ 或 22.12+，以及 Xcode Command Line Tools。Docker Desktop 是可选项，原生控制 App 不会使用它：
 
 ```zsh
 git clone https://github.com/supermancantfly007/mCodex.git
@@ -57,35 +57,23 @@ cp .env.docker.example .env.docker
 # 编辑 .env.docker，至少填写 Codex Home 和项目根目录
 ```
 
-第一次使用时，等 Codex 中的任务结束后，用 `Command-Q` 完全退出 Codex Desktop，再执行：
-
-```zsh
-./scripts/manage-docker.sh up
-```
-
-`up` 会先检查并按需原生启动 Codex，控制端口仅监听 `127.0.0.1:9222`，随后构建并启动 Bridge；启用 VPS 时也会启动隧道 sidecar。如果 Codex 正在运行但没有控制通道，脚本会安全退出并提示你先结束任务、完全退出 Codex，不会强制关闭它。
-
-之后用以下命令启停即可。`down` 只停止 mCodex 与隧道容器，不会退出 Codex Desktop，也不会终止 Codex 任务：
-
-```zsh
-./scripts/manage-docker.sh status
-./scripts/manage-docker.sh logs
-./scripts/manage-docker.sh restart
-./scripts/manage-docker.sh down
-./scripts/manage-docker.sh open
-```
-
-`.env.docker` 包含本机路径和可选的 VPS 信息，已被 Git 忽略，不要提交。Bridge 只发布到 Mac 的 `127.0.0.1:3210`；容器通过 `host.docker.internal` 连接 Codex 的本地控制端口。
-
-Docker Desktop 的 Start 按钮只能启动容器，不能执行 Mac 宿主机命令，因此无法自行拉起 Codex App。需要自动处理 Codex CDP 时请使用上面的 `manage-docker.sh up`；如果 Codex 已处于 CDP 模式，也可以直接在 Docker Desktop 中启停容器。
-
-不想使用终端时，可以安装 macOS 控制 App：
+macOS 推荐使用原生控制 App。只需安装一次：
 
 ```zsh
 ./scripts/install-macos-control-app.sh
 ```
 
-安装位置为 `~/Applications/mCodex Control.app`。把它拖到 Dock 后，点击一次会自动启动 Docker Desktop、Codex CDP、Bridge 和 VPS 隧道；再次点击只停止 Bridge 与隧道，不退出 Codex Desktop。安装是一次性的，之后无需再执行终端命令。
+安装位置为 `~/Applications/mCodex Control.app`，可以直接打开或拖到 Dock。App 会保持运行，直接在 macOS 上管理 Bridge 和 SSH 隧道，不使用 Docker；窗口会显示当前配对码和倒计时，过期后自动换码。关闭窗口、点击“停止并退出”或按 `Command-Q` 时，只停止 Bridge 与隧道，不退出 Codex Desktop。
+
+第一次运行时，如果 Codex Desktop 已经打开但没有本地控制通道，请先等任务结束，再用 `Command-Q` 完全退出一次；控制 App 会按正确方式重新打开它。`.env.docker` 已被 Git 忽略，原生 App 会复用其中的本机路径和 VPS 隧道配置。
+
+如果更偏好容器，Docker Compose 仍作为可选方式保留：
+
+```zsh
+./scripts/manage-docker.sh up
+```
+
+不要同时运行原生 App 和 Docker 版，因为两者都会使用本机 `3210` 端口。
 
 ## 手机连接
 
@@ -95,11 +83,11 @@ Docker Desktop 的 Start 按钮只能启动容器，不能执行 Mac 宿主机�
 2. 手机和电脑连接同一个 Wi-Fi 或网络。
 3. 扫描电脑页面上的二维码，或打开页面显示的地址并输入配对码。
 
-配对码有效期为 10 分钟。配对成功后，设备会保持信任，直到保存的 Token 被撤销。
+配对码有效期为 10 分钟，原生 App 会在过期后自动刷新。配对成功后，设备会保持信任，直到保存的 Token 被撤销。
 
 ### 远程访问
 
-不安装 Tailscale 等组网客户端，也可以通过“VPS Caddy + SSH 反向隧道 + Cloudflare Access”提供普通 HTTPS 网页入口。macOS Docker 方式把隧道作为 Compose sidecar 管理；在 `.env.docker` 中启用 VPS 配置后，`up` 和 `down` 会一起管理 Bridge 与隧道。详见 [VPS 公网部署指南](deploy/README_ZH.md)。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
+不安装 Tailscale 等组网客户端，也可以通过“VPS Caddy + SSH 反向隧道 + Cloudflare Access”提供普通 HTTPS 网页入口。原生控制 App 会统一管理 Bridge 与 SSH 隧道。详见 [VPS 公网部署指南](deploy/README_ZH.md)。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
 
 ## 可以做什么
 
@@ -131,17 +119,17 @@ Docker Desktop 的 Start 按钮只能启动容器，不能执行 Mac 宿主机�
 
 ## 环境要求
 
-- Windows 10/11，或实验支持的 macOS 12+
+- Windows 10/11，或实验支持的 macOS 13+
 - Windows 安装 Microsoft Store 版 Codex Desktop；macOS 安装官方 Codex Desktop
 - 手机或其他设备使用现代浏览器
-- Windows 源码方式需要 Node.js；macOS Docker 方式不需要宿主机 Node.js
+- 源码运行需要 Node.js 20.19+ 或 22.12+；原生 macOS App 安装器还需要 Xcode Command Line Tools
 
 ## 重要安全提示
 
 - 使用内网穿透时保留配对鉴权，并妥善保护对外访问地址。
 - 不要暴露或转发 Codex CDP 端口 `9222`。
 - mCodex 不提供公网中转、用户账号或多用户隔离。
-- 公网域名应增加 Cloudflare Access 等独立身份认证，并禁止代理 `/api/pairing-info`。
+- 公网域名应增加 Cloudflare Access 等独立身份认证，并禁止代理 `/api/pairing-info` 和 `/api/pairing-refresh`。
 - 第三方内网穿透和远程组网可以作为连接方式，但其安全性和可用性由对应工具及使用者负责。
 
 完整说明见 [SECURITY.md](SECURITY.md)。

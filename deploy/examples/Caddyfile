@@ -12,7 +12,7 @@ mcodex.example.com {
 
 	# The pairing code must only be read from the Mac page or local logs. A
 	# reverse tunnel otherwise makes the proxy request appear local to mCodex.
-	@local_pairing_info path /api/pairing-info
+	@local_pairing_info path /api/pairing-info /api/pairing-refresh
 	respond @local_pairing_info 404
 
 	request_body {

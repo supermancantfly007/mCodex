@@ -12,6 +12,7 @@ import { CodexCdpController, isCodexPermissionMode, isFollowUpMode, type CodexIm
 import { SessionStore } from "./sessions/store.js";
 import { SessionWatcher } from "./sessions/watcher.js";
 import { reconcileRuntimeStatuses } from "./runtime-status.js";
+import { createPairingCodes } from "./pairing.js";
 import type { BridgeEvent, TimelineItem } from "./types.js";
 
 class BadRequestError extends Error {}
@@ -79,9 +80,7 @@ function parseImageInputs(value: unknown): CodexImageInput[] {
 }
 
 export async function createBridge() {
-  const pairingCode = crypto.randomBytes(4).toString("hex").toUpperCase();
-  let pairingAttempts = 0;
-  const pairingExpiresAt = Date.now() + 10 * 60 * 1000;
+  const pairing = createPairingCodes();
   const sessions = new SessionStore(config.codexHome);
   const watcher = new SessionWatcher(config.codexHome, config.scanIntervalMs);
   const cdp = new CodexCdpController(config.cdpUrl, sessions);
@@ -90,37 +89,44 @@ export async function createBridge() {
   app.use(compression({ threshold: 1_024 }));
   // Four 10 MB images expand to roughly 53.4 MB when encoded as Base64.
   app.use(express.json({ limit: "60mb" }));
-  app.get("/api/health", (_req, res) => res.json({ ok: true, authRequired: Boolean(config.token), pairingAvailable: Boolean(config.external && Date.now() < pairingExpiresAt) }));
+  app.get("/api/health", (_req, res) => res.json({ ok: true, authRequired: Boolean(config.token), pairingAvailable: config.external }));
   app.get("/api/pairing-info", (req, res) => {
     if (!isLoopbackAddress(req.socket.remoteAddress)) {
       res.status(403).json({ error: "Pairing information is only available on this computer" });
       return;
     }
+    const activePairing = pairing.current();
     const addresses = Object.values(os.networkInterfaces()).flatMap((entries) => entries ?? [])
       .filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254."))
       .map((entry) => entry.address);
     const urls = [...new Set(addresses)].map((address) => {
       const url = new URL(`http://${address}:${config.port}/`);
-      url.searchParams.set("pairing", pairingCode);
+      url.searchParams.set("pairing", activePairing.code);
       return url.toString();
     });
     res.json({
-      available: Boolean(config.external && Date.now() < pairingExpiresAt),
-      expiresAt: pairingExpiresAt,
-      pairingCode: config.external ? pairingCode : "",
+      available: config.external,
+      expiresAt: activePairing.expiresAt,
+      pairingCode: config.external ? activePairing.code : "",
       urls,
     });
   });
-  app.post("/api/pair", (req, res) => {
-    if (pairingAttempts >= 10) {
-      res.status(429).json({ error: "Pairing temporarily locked; restart the Bridge to generate a new code" });
+  app.post("/api/pairing-refresh", (req, res) => {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      res.status(403).json({ error: "Pairing codes can only be refreshed on this computer" });
       return;
     }
-    const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
-    pairingAttempts += 1;
-    const expected = Buffer.from(pairingCode);
-    const actual = Buffer.from(code);
-    if (!config.external || Date.now() >= pairingExpiresAt || actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+    const activePairing = pairing.refresh();
+    res.json({ available: config.external, expiresAt: activePairing.expiresAt, pairingCode: config.external ? activePairing.code : "" });
+  });
+  app.post("/api/pair", (req, res) => {
+    const code = typeof req.body?.code === "string" ? req.body.code : "";
+    const result = config.external ? pairing.verify(code) : "invalid";
+    if (result === "locked") {
+      res.status(429).json({ error: "Pairing temporarily locked; refresh the code in mCodex Control" });
+      return;
+    }
+    if (result !== "accepted") {
       res.status(401).json({ error: "Invalid or expired pairing code" });
       return;
     }
@@ -129,7 +135,7 @@ export async function createBridge() {
   app.use("/api", auth);
 
   app.get("/api/status", async (_req, res) => {
-    res.json({ cdp: await cdp.status(), codexHome: config.codexHome, pairing: { available: Boolean(config.external && Date.now() < pairingExpiresAt) } });
+    res.json({ cdp: await cdp.status(), codexHome: config.codexHome, pairing: { available: config.external } });
   });
   app.put("/api/permissions", async (req, res, next) => {
     try {
@@ -366,7 +372,8 @@ export async function createBridge() {
   streamPoll.unref();
   await watcher.start();
   if (config.external) {
-    console.log(serverText(`手机配对码（有效期 10 分钟）：${pairingCode}`, `Phone pairing code (valid for 10 minutes): ${pairingCode}`));
+    const activePairing = pairing.current();
+    console.log(serverText(`手机配对码（有效期 10 分钟）：${activePairing.code}`, `Phone pairing code (valid for 10 minutes): ${activePairing.code}`));
     if (config.tokenGenerated) console.log(serverText(`Bridge 访问令牌：${config.token}`, `Bridge access token: ${config.token}`));
   }
 
@@ -383,4 +390,3 @@ export async function createBridge() {
     },
   };
 }
-

@@ -1,6 +1,6 @@
 # 通过 VPS 公网访问
 
-这套方案不依赖 Tailscale。Codex Desktop 原生运行在 Mac，mCodex Bridge 和 SSH 反向隧道运行在本地 Docker；VPS 上的 Caddy 提供普通 HTTPS 网页入口。
+这套方案不依赖 Tailscale。Codex Desktop、mCodex Bridge 和 SSH 反向隧道都原生运行在 Mac；VPS 上的 Caddy 提供普通 HTTPS 网页入口。Docker Compose 仅作为可选运行方式保留。
 
 ```text
 浏览器
@@ -8,18 +8,18 @@
   → VPS Caddy（HTTPS，可再加 Basic Auth）
   → VPS 内部 socket proxy
   → 仅监听 VPS 127.0.0.1 的 SSH 反向隧道
-  → Mac Docker 中的 mCodex :3210
-  → host.docker.internal:9222
+  → Mac 原生 mCodex :3210
+  → 127.0.0.1:9222
   → Codex Desktop
 ```
 
 ## 安全边界
 
 - Codex CDP `9222` 必须始终只监听 Mac 的 `127.0.0.1`，不得发布到局域网、Docker 端口或 VPS。
-- mCodex 只发布到 Mac 的 `127.0.0.1:3210`；SSH sidecar 通过 Compose 内部网络访问它。
+- mCodex 只监听 Mac 的 `127.0.0.1:3210`；原生 SSH 进程仅把该端口反向转发到 VPS 回环地址。
 - SSH 远端端口只监听 VPS 的 `127.0.0.1`，不得使用 `0.0.0.0`。
 - 公网域名前必须配置 Cloudflare Access 或同等身份认证，只允许自己的账号。Caddy Basic Auth 可作为第二层保护。
-- Caddy 必须禁止公网读取 `/api/pairing-info`，并丢弃该站点访问日志，避免设备 Token 出现在日志中。
+- Caddy 必须禁止公网访问 `/api/pairing-info` 和 `/api/pairing-refresh`，并丢弃该站点访问日志，避免设备 Token 出现在日志中。
 - `.env.docker`、SSH 私钥、真实域名、VPS 地址和密码不得提交到公共仓库。
 
 ## 1. 配置 Mac
@@ -45,25 +45,22 @@ MCODEX_VPS_TUNNEL_PORT=13210
 MCODEX_VPS_SSH_KEY=/Users/you/.ssh/mcodex-tunnel
 ```
 
-SSH 私钥应设为 `600`。第一次使用本地控制通道时，先等 Codex 当前任务结束，再用 `Command-Q` 完全退出 Codex Desktop，然后运行：
+SSH 私钥应设为 `600`。安装并打开原生控制 App：
 
 ```zsh
-./scripts/manage-docker.sh up
+./scripts/install-macos-control-app.sh
+open "$HOME/Applications/mCodex Control.app"
 ```
 
-`manage-docker.sh up` 会先检查并按需原生启动 Codex 控制通道，再由 Compose 启动 Bridge 与隧道。如果 Codex 正在运行但没有控制通道，脚本不会强制退出它，而是提示等待当前任务结束后手工完全退出。日常命令：
+App 会直接管理原生 Bridge 和 SSH 隧道，显示并自动刷新配对码；关闭窗口或按 `Command-Q` 会停止这两个后台进程，但不会退出 Codex Desktop。底层诊断命令为：
 
 ```zsh
-./scripts/manage-docker.sh status
-./scripts/manage-docker.sh logs
-./scripts/manage-docker.sh restart
-./scripts/manage-docker.sh down
-./scripts/manage-docker.sh open
+./scripts/manage-native-macos.sh status
+./scripts/manage-native-macos.sh logs
+./scripts/manage-native-macos.sh down
 ```
 
-`down` 不会退出 Codex Desktop，也不会停止正在执行的 Codex 任务。
-
-Docker Desktop 的 Start 按钮不能执行 Mac 宿主机命令。需要自动拉起 Codex CDP 时必须使用 `manage-docker.sh up`；Codex 已处于 CDP 模式时才可直接用 Docker Desktop 启停。
+如果首次打开时 Codex 已在运行但没有控制通道，先完成当前任务并用 `Command-Q` 完全退出一次，再重新打开控制 App。不要同时运行原生 App 与 Docker Compose 版。
 
 ## 2. 限制 VPS 上的 SSH 隧道
 
@@ -78,7 +75,7 @@ restrict,port-forwarding,permitlisten="127.0.0.1:13210" ssh-ed25519 AAAA... mcod
 隧道最终必须是：
 
 ```text
-VPS 127.0.0.1:13210 → Mac Compose 服务 mcodex:3210
+VPS 127.0.0.1:13210 → Mac 127.0.0.1:3210
 ```
 
 ## 3. 让 Docker 中的 Caddy 访问回环隧道
@@ -110,7 +107,7 @@ sudo iptables -I INPUT \
 
 - WebSocket 反向代理；
 - 64 MB 请求体上限；
-- `/api/pairing-info` 返回 `404`；
+- `/api/pairing-info` 和 `/api/pairing-refresh` 返回 `404`；
 - 安全响应头；
 - 丢弃访问日志。
 
@@ -128,10 +125,10 @@ Cloudflare 侧需要：
 在不触碰 Codex Desktop 的情况下，可以执行：
 
 ```zsh
-./scripts/manage-docker.sh config
-./scripts/manage-docker.sh status
+./scripts/manage-native-macos.sh status
+./scripts/manage-native-macos.sh logs
 ```
 
-需要查看隧道重连情况时运行 `./scripts/manage-docker.sh logs`。VPS 侧同时检查 SSH 登录日志、socket proxy 状态和 Caddy 日志；不要在命令输出或文档中打印密码、私钥或完整设备 Token。
+VPS 侧同时检查 SSH 登录日志、socket proxy 状态和 Caddy 日志；不要在命令输出或文档中打印密码、私钥、完整设备 Token 或仍有效的配对码。
 
-`deploy/examples/start-public-tunnel.sh.example` 和 LaunchAgent plist 是早期宿主机 Node/SSH 方案，仅为已有部署保留。新的 macOS 部署应使用 `compose.yaml` 与 `scripts/manage-docker.sh`。
+`deploy/examples/start-public-tunnel.sh.example` 和 LaunchAgent plist 是早期宿主机 Node/SSH 方案，仅为已有部署保留。新的 macOS 部署应使用 `mCodex Control.app` 与 `scripts/manage-native-macos.sh`；`compose.yaml` 仅作为可选 Docker 方式保留。
