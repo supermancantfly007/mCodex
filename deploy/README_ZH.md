@@ -93,6 +93,17 @@ Caddy 容器 → Docker 网关:13211 → VPS 127.0.0.1:13210
 
 先用 `docker network inspect` 确认 Caddy 网络的宿主机网关地址，再让 `.socket` 单元只监听该地址。不要把代理端口绑定到 `0.0.0.0`，也不要为了容器连通性放宽 SSH 的回环监听限制。
 
+如果 VPS 的 `INPUT` 防火墙默认拒绝连接，还必须只允许 Caddy Docker 网段访问这个网关端口，否则 Caddy 会返回 `502`，而 `127.0.0.1:13210` 上的隧道本身仍可能完全正常。例如 Caddy 网络为 `172.19.0.0/16`、网关为 `172.19.0.1` 时：
+
+```bash
+sudo iptables -I INPUT \
+  -s 172.19.0.0/16 -d 172.19.0.1/32 \
+  -p tcp --dport 13211 -m conntrack --ctstate NEW \
+  -m comment --comment mcodex-caddy-proxy -j ACCEPT
+```
+
+应通过 VPS 使用的防火墙管理工具持久化该规则，例如已安装 `iptables-persistent` 时运行 `sudo netfilter-persistent save`。不要放行公网接口上的 `13211`。最后分别从 VPS 宿主机检查 `127.0.0.1:13210`，并从 Caddy 容器检查网关的 `13211`，两者都应返回 mCodex 健康响应。
+
 ## 4. 配置 Caddy 和 Cloudflare
 
 把 [`examples/Caddyfile`](examples/Caddyfile) 中的站点合并到 VPS Caddyfile，并替换域名与 upstream。模板包含：
