@@ -34,11 +34,10 @@ escaped_project_root="$(print -rn -- "$PROJECT_ROOT" | /usr/bin/sed 's/[\\&|]/\\
   "${TEMPORARY_DIRECTORY}/mcodex-control.applescript"
 
 render_icon() {
-  local preview_directory="${TEMPORARY_DIRECTORY}/preview"
   local iconset_directory="${TEMPORARY_DIRECTORY}/mCodex.iconset"
-  /bin/mkdir -p "$preview_directory" "$iconset_directory"
-  /usr/bin/qlmanage -t -s 1024 -o "$preview_directory" "$ICON_FILE" >/dev/null 2>&1
-  local preview_file="${preview_directory}/$(/usr/bin/basename "$ICON_FILE").png"
+  local preview_file="${TEMPORARY_DIRECTORY}/mCodex-1024.png"
+  /bin/mkdir -p "$iconset_directory"
+  /usr/bin/sips -s format png "$ICON_FILE" --out "$preview_file" >/dev/null
   [[ -f "$preview_file" ]] || return 1
 
   /usr/bin/sips -z 16 16 "$preview_file" --out "${iconset_directory}/icon_16x16.png" >/dev/null
