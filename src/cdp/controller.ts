@@ -176,7 +176,7 @@ export class CodexCdpController {
     if (this.browserConnectInFlight) return this.browserConnectInFlight;
 
     const connection = withTimeout(
-      chromium.connectOverCDP(this.endpoint),
+      chromium.connectOverCDP(this.endpoint, { noDefaults: true, timeout: 3_000 }),
       3_000,
       "Connecting to the Codex control channel timed out",
     );
