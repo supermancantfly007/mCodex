@@ -19,3 +19,8 @@ export interface TimelineScrollMetrics {
 export function shouldShowJumpToLatest(metrics: TimelineScrollMetrics, threshold = 120): boolean {
   return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight > threshold;
 }
+
+export function timelineFollowState(metrics: TimelineScrollMetrics, threshold = 120): { followLatest: boolean; showJumpToLatest: boolean } {
+  const showJumpToLatest = shouldShowJumpToLatest(metrics, threshold);
+  return { followLatest: !showJumpToLatest, showJumpToLatest };
+}

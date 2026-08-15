@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { QRCodeSVG } from "qrcode.react";
 import { createClientMessageId } from "./client-id";
 import { applyDesktopRuntime } from "./desktop-runtime";
-import { normalizeStoredThreadId, resolveStoredThreadId, selectedThreadStorageKey, shouldShowJumpToLatest } from "./thread-view";
+import { normalizeStoredThreadId, resolveStoredThreadId, selectedThreadStorageKey, timelineFollowState } from "./thread-view";
 import { buildDesktopTimeline, rollbackTimelineItems, shouldShowThinking, type DesktopDisplayItem, type TimelineActivityFile } from "./timeline";
 import "./styles.css";
 
@@ -276,6 +276,9 @@ function App() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(initialExpandedGroups);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const timelineContentRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+  const timelineTouchYRef = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<string | null>(null);
   const pendingThreadRestoreRef = useRef<string | null>(normalizeStoredThreadId(localStorage.getItem(selectedThreadStorageKey)));
@@ -383,17 +386,23 @@ function App() {
     } catch { /* The manual pairing form remains available. */ }
   }
 
-  async function openThread(id: string, syncDesktop = true) {
+  async function openThread(id: string, syncDesktop = true, resetTimelinePosition = true) {
     const requestId = ++openRequestRef.current;
+    const refreshInPlace = !resetTimelinePosition && selectedRef.current === id;
     pendingThreadRestoreRef.current = null;
     localStorage.setItem(selectedThreadStorageKey, id);
     selectedRef.current = id;
     setSelected(id);
-    setShowJumpToLatest(false);
+    if (resetTimelinePosition) {
+      followLatestRef.current = true;
+      setShowJumpToLatest(false);
+    }
     setSwitchingThread(syncDesktop);
-    setTimelineLoading(true);
-    setItems([]);
-    setApprovals([]);
+    if (!refreshInPlace) {
+      setTimelineLoading(true);
+      setItems([]);
+      setApprovals([]);
+    }
     setError("");
     const timelineRequest = api<{ items: Item[]; approvals?: Approval[] }>(`/api/threads/${id}/timeline`);
     void timelineRequest.then((timeline) => {
@@ -426,6 +435,7 @@ function App() {
     pendingThreadRestoreRef.current = null;
     localStorage.removeItem(selectedThreadStorageKey);
     selectedRef.current = null;
+    followLatestRef.current = true;
     setSelected(null);
     setShowJumpToLatest(false);
   }
@@ -433,14 +443,33 @@ function App() {
   function updateTimelinePosition() {
     const timeline = timelineRef.current;
     if (!timeline) return;
-    setShowJumpToLatest(shouldShowJumpToLatest(timeline));
+    const state = timelineFollowState(timeline);
+    if (state.followLatest) followLatestRef.current = true;
+    setShowJumpToLatest(state.showJumpToLatest);
+  }
+
+  function handleTimelineWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (event.deltaY < 0) followLatestRef.current = false;
+  }
+
+  function handleTimelineTouchStart(event: React.TouchEvent<HTMLDivElement>) {
+    timelineTouchYRef.current = event.touches[0]?.clientY ?? null;
+  }
+
+  function handleTimelineTouchMove(event: React.TouchEvent<HTMLDivElement>) {
+    const nextY = event.touches[0]?.clientY ?? null;
+    if (nextY !== null && timelineTouchYRef.current !== null && nextY > timelineTouchYRef.current) {
+      followLatestRef.current = false;
+    }
+    timelineTouchYRef.current = nextY;
   }
 
   function jumpToLatest() {
     const timeline = timelineRef.current;
     if (!timeline) return;
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    timeline.scrollTo({ top: timeline.scrollHeight, behavior });
+    followLatestRef.current = true;
+    setShowJumpToLatest(false);
+    timeline.scrollTo({ top: timeline.scrollHeight, behavior: "auto" });
   }
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
@@ -483,7 +512,7 @@ function App() {
       void refreshThreads();
       void refreshProjects();
       const currentThreadId = selectedRef.current;
-      if (currentThreadId) void openThread(currentThreadId, false);
+      if (currentThreadId) void openThread(currentThreadId, false, false);
     };
 
     const handleMessage = (message: MessageEvent) => {
@@ -571,12 +600,37 @@ function App() {
     };
   }, [authEpoch]);
   useEffect(() => {
-    const timeline = timelineRef.current;
-    if (timeline) {
+    if (!followLatestRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!followLatestRef.current) return;
+      const timeline = timelineRef.current;
+      if (!timeline) return;
       timeline.scrollTop = timeline.scrollHeight;
       setShowJumpToLatest(false);
-    }
-  }, [items, streamingOutput?.text]);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selected, items, streamingOutput?.text, timelineLoading]);
+  useEffect(() => {
+    const content = timelineContentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (!followLatestRef.current) return;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        if (!followLatestRef.current) return;
+        const timeline = timelineRef.current;
+        if (!timeline) return;
+        timeline.scrollTop = timeline.scrollHeight;
+        setShowJumpToLatest(false);
+      });
+    });
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [selected]);
 
   function addImages(files: File[]) {
     const supported = new Set(["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"]);
@@ -787,7 +841,8 @@ function App() {
       {selectedThread ? <>
         <header className="thread-header"><button className="icon-button mobile-back" onClick={closeThread} title={t("返回任务列表")}><ArrowLeft size={20} /></button><div><h1>{selectedThread.title}</h1><p>{selectedThread.cwd}</p></div><span className={`status-chip ${selectedThread.status}`}>{selectedThread.status === "running" ? <Activity size={14} /> : selectedThread.status === "waiting_approval" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{t(statusLabel[selectedThread.status])}</span>{approvalVisible && <div className="thread-actions"><button className="control-button approve" onClick={() => void control("approval", { decision: "approve" })} disabled={controlBusy || switchingThread} title={t("批准")}><Check size={16} />{t("批准")}</button><button className="control-button reject" onClick={() => void control("approval", { decision: "reject" })} disabled={controlBusy || switchingThread} title={t("拒绝")}><X size={16} />{t("拒绝")}</button></div>}</header>
         <div className="timeline-shell">
-        <div className="timeline" ref={timelineRef} onScroll={updateTimelinePosition}>
+        <div className="timeline" ref={timelineRef} onScroll={updateTimelinePosition} onWheel={handleTimelineWheel} onTouchStart={handleTimelineTouchStart} onTouchMove={handleTimelineTouchMove} onTouchEnd={() => { timelineTouchYRef.current = null; }}>
+          <div className="timeline-content" ref={timelineContentRef}>
           {timelineLoading && <div className="timeline-loading" role="status"><LoaderCircle className="spin" size={18} />{t("正在加载对话")}</div>}
           {displayItems.map((display) => {
             if (display.type === "reasoning") return <div key={display.item.id} className={`progress-event${isActivelyRunning(selectedThread, desktopThreadId) ? " active" : ""}`}>{display.item.text}</div>;
@@ -806,6 +861,7 @@ function App() {
           })}
           {thinking && <div className="progress-event active" role="status" aria-live="polite">{t("正在思考")}</div>}
           {liveOutput && <article className="assistant-message markdown-body streaming-message"><MarkdownText text={liveOutput} /><span className="stream-caret" aria-hidden="true" /></article>}
+          </div>
         </div>
         {showJumpToLatest && <button className="jump-latest-button" type="button" onClick={jumpToLatest} title={t("跳到最新消息")} aria-label={t("跳到最新消息")}><ArrowDown size={15} /><span>{t("最新消息")}</span></button>}
         </div>

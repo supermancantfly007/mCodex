@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeStoredThreadId, resolveStoredThreadId, shouldShowJumpToLatest } from "./thread-view.js";
+import { normalizeStoredThreadId, resolveStoredThreadId, shouldShowJumpToLatest, timelineFollowState } from "./thread-view.js";
 
 describe("stored thread selection", () => {
   it("restores an existing thread and rejects a missing one", () => {
@@ -19,5 +19,21 @@ describe("shouldShowJumpToLatest", () => {
   it("shows only when the timeline is meaningfully above the bottom", () => {
     expect(shouldShowJumpToLatest({ scrollHeight: 2_000, scrollTop: 700, clientHeight: 800 })).toBe(true);
     expect(shouldShowJumpToLatest({ scrollHeight: 2_000, scrollTop: 1_100, clientHeight: 800 })).toBe(false);
+  });
+});
+
+describe("timelineFollowState", () => {
+  it("follows new output while the reader is at the latest message", () => {
+    expect(timelineFollowState({ scrollHeight: 2_000, scrollTop: 1_100, clientHeight: 800 })).toEqual({
+      followLatest: true,
+      showJumpToLatest: false,
+    });
+  });
+
+  it("stops following new output after the reader scrolls into history", () => {
+    expect(timelineFollowState({ scrollHeight: 2_000, scrollTop: 700, clientHeight: 800 })).toEqual({
+      followLatest: false,
+      showJumpToLatest: true,
+    });
   });
 });

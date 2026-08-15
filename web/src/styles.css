@@ -302,6 +302,8 @@ button { color: inherit; }
   background: #ffffff;
 }
 
+.timeline-content { width: 100%; min-height: 100%; }
+
 .jump-latest-button {
   position: absolute;
   left: 50%;
