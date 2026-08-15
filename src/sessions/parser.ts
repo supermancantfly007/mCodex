@@ -155,6 +155,18 @@ export function rollbackTimelineItems(items: TimelineItem[], turns: number): Tim
 export function timelineFromRecords(records: Array<{ record: JsonObject; offset: number }>, threadId: string): TimelineItem[] {
   let items: TimelineItem[] = [];
   for (const { record, offset } of records) {
+    if (record.type === "compacted") {
+      const compactionMessage = typeof record.payload?.message === "string" ? record.payload.message : "";
+      const candidate = items.at(-1);
+      if (candidate?.kind === "message"
+        && candidate.role === "assistant"
+        && candidate.phase === "final_answer"
+        && candidate.text
+        && compactionMessage.includes(candidate.text)) {
+        items = items.slice(0, -1);
+      }
+      continue;
+    }
     const rollbackTurns = rollbackTurnsFromRecord(record);
     if (rollbackTurns) {
       items = rollbackTimelineItems(items, rollbackTurns);

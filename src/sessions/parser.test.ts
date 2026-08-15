@@ -145,4 +145,32 @@ describe("session parser", () => {
 
     expect(timelineFromRecords(records, "thread")).toEqual([]);
   });
+
+  it("hides the internal handoff message recorded immediately before compaction", () => {
+    const compactionSummary = "## Internal handoff\n- diagnosing-bugs\n- continue from here";
+    const records = [
+      { offset: 0, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "first prompt" }] } } },
+      { offset: 10, record: { type: "response_item", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ text: "visible answer" }] } } },
+      { offset: 20, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "continue" }] } } },
+      { offset: 30, record: { type: "response_item", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ text: compactionSummary }] } } },
+      { offset: 40, record: { type: "event_msg", payload: { type: "token_count" } } },
+      { offset: 50, record: { type: "compacted", payload: { message: `<summary>\n${compactionSummary}\n</summary>`, replacement_history: [] } } },
+    ];
+
+    expect(timelineFromRecords(records, "thread").map((item) => item.text)).toEqual([
+      "first prompt",
+      "visible answer",
+      "continue",
+    ]);
+  });
+
+  it("keeps a real final answer when a later compaction does not contain it", () => {
+    const records = [
+      { offset: 0, record: { type: "response_item", payload: { type: "message", role: "user", content: [{ text: "question" }] } } },
+      { offset: 10, record: { type: "response_item", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ text: "real answer" }] } } },
+      { offset: 20, record: { type: "compacted", payload: { message: "unrelated compacted state", replacement_history: [] } } },
+    ];
+
+    expect(timelineFromRecords(records, "thread").map((item) => item.text)).toEqual(["question", "real answer"]);
+  });
 });
