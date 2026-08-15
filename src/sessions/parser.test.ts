@@ -63,16 +63,10 @@ describe("session parser", () => {
     ])).toBe("completed");
   });
 
-  it("shows compact reasoning progress without markdown wrappers", () => {
+  it("keeps internal agent reasoning out of the visible timeline", () => {
     const item = timelineFromRecord({ type: "event_msg", payload: { type: "agent_reasoning", text: "**Planning concurrent work**" } }, "thread", 14);
-    expect(item).toMatchObject({ kind: "reasoning", text: "Planning concurrent work" });
-    expect(item && isVisibleTimelineItem(item)).toBe(true);
-  });
-
-  it("caps anomalously large reasoning events for remote timelines", () => {
-    const item = timelineFromRecord({ type: "event_msg", payload: { type: "agent_reasoning", text: "x".repeat(10_000) } }, "thread", 15);
-    expect(item?.text).toHaveLength(4_000);
-    expect(item?.text.endsWith("…")).toBe(true);
+    expect(item).toBeNull();
+    expect(inferStatus([{ type: "event_msg", payload: { type: "agent_reasoning", text: "**Planning concurrent work**" } }])).toBe("running");
   });
 
   it("reads successful file changes from the structured completion event", () => {

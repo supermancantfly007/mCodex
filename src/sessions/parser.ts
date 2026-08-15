@@ -8,7 +8,6 @@ const INTERNAL_CONTEXT_PREFIXES = [
   "<permissions instructions>",
   "<skills_instructions>",
 ];
-const MAX_REASONING_TEXT_LENGTH = 4_000;
 
 export function parseJsonLine(line: string): JsonObject | null {
   try {
@@ -214,11 +213,9 @@ export function timelineFromRecord(record: JsonObject, threadId: string, offset:
       return { id, threadId, timestamp, kind: "status", role: "system", text: status, eventType };
     }
     if (eventType === "agent_reasoning") {
-      const rawText = String(payload.text ?? "").trim().replace(/^\*\*(.+)\*\*$/s, "$1");
-      const text = rawText.length > MAX_REASONING_TEXT_LENGTH
-        ? `${rawText.slice(0, MAX_REASONING_TEXT_LENGTH - 1).trimEnd()}…`
-        : rawText;
-      return text ? { id, threadId, timestamp, kind: "reasoning", role: "assistant", text, eventType } : null;
+      // Desktop treats this as private reasoning metadata rather than a chat
+      // message. It still contributes to inferStatus(), but is never rendered.
+      return null;
     }
   }
   return null;

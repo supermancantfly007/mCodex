@@ -88,6 +88,17 @@ describe("selectCurrentStreamingText", () => {
       { identity: "assistant-reasoning", content: "" },
     ])).toBe("");
   });
+
+  it("uses the complete Markdown message instead of an inline-code fragment", () => {
+    const completeMessage = "重复记录中的证券代码 `603213` 只是整条进度消息的一部分。";
+    const candidate = {
+      identity: "assistant",
+      content: "603213",
+      rootContent: completeMessage,
+    };
+
+    expect(selectCurrentStreamingText([candidate])).toBe(completeMessage);
+  });
 });
 
 describe("selectRecentThreadIds", () => {
@@ -124,8 +135,13 @@ describe("CodexCdpController.createTask", () => {
     };
     const sendButton = {
       count: async () => 1,
-      isDisabled: async () => false,
-      click: async () => { submitted = true; },
+      // React enables the composer action on the render after fill(). A real
+      // Playwright click waits for that transition instead of sampling it.
+      isDisabled: async () => true,
+      click: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        submitted = true;
+      },
     };
     const page = {
       getByRole: (_role: string, options: { name?: string | RegExp }) => {

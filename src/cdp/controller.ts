@@ -23,6 +23,7 @@ export interface StreamingOutput {
 export interface StreamingCandidate {
   identity: string;
   content: string;
+  rootContent?: string;
 }
 
 export type CodexPermissionMode = "ask" | "auto" | "full-access";
@@ -91,7 +92,7 @@ export function selectCurrentStreamingText(candidates: StreamingCandidate[]): st
     const candidate = candidates[index];
     if (!candidate) continue;
     if (/(?:^|[-_: ])(?:user|you)(?:$|[-_: ])/i.test(candidate.identity)) return "";
-    const content = candidate.content.trim();
+    const content = (candidate.rootContent ?? candidate.content).trim();
     if (content) return content;
   }
   return "";
@@ -334,6 +335,9 @@ export class CodexCdpController {
           .map((node) => {
             const roleNode = node.closest<HTMLElement>("[data-message-author-role], [data-message-role], [data-role]")
               ?? node.querySelector<HTMLElement>("[data-message-author-role], [data-message-role], [data-role]");
+            const markdownRoot = node.matches('[data-markdown-text-style], [class*="MarkdownRoot" i]')
+              ? node
+              : node.querySelector<HTMLElement>('[data-markdown-text-style], [class*="MarkdownRoot" i]');
             const markdown = node.matches('[class*="markdown"]') ? node : node.querySelector<HTMLElement>('[class*="markdown"]');
             return {
               identity: [
@@ -344,6 +348,7 @@ export class CodexCdpController {
                 roleNode?.getAttribute("aria-label"),
               ].filter(Boolean).join(" "),
               content: markdown?.innerText ?? "",
+              rootContent: markdownRoot?.innerText,
             };
           });
       });
@@ -628,9 +633,14 @@ export class CodexCdpController {
       await editor.fill(content);
       if (normalizeText(await editor.innerText()) !== normalizeText(content)) throw new Error("Composer content did not match the requested message");
       const action = page.locator(".composer-surface-chrome button.size-token-button-composer");
-      if (await action.count() !== 1 || await action.isDisabled()) throw new Error("Codex send control is unavailable");
       const sentAt = Date.now();
-      await action.click();
+      try {
+        // Locator.click waits for the composer action to become attached,
+        // visible and enabled after React processes editor.fill().
+        await action.click({ timeout: 8_000 });
+      } catch (error) {
+        throw new Error("Codex send control is unavailable", { cause: error });
+      }
 
       const deadline = Date.now() + 20_000;
       while (Date.now() < deadline) {
