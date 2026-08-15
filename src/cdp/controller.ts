@@ -116,6 +116,16 @@ export function selectRecentThreadIds(sidebarThreadIds: string[], assignedThread
     .filter((threadId) => threadId && !threadId.startsWith("client-new-thread:") && !assigned.has(threadId)))];
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function projectNewTaskButtonName(projectName: string): RegExp {
+  return new RegExp(`^在 ${escapeRegex(projectName)} 中(?:新建任务|开始新聊天)$`);
+}
+
+const genericNewTaskButtonText = /^(?:新建任务|新对话)$/;
+
 interface ThreadProjectAssignment {
   projectKind?: string;
   projectId?: string;
@@ -584,7 +594,7 @@ export class CodexCdpController {
       await this.setGlobalState(page, "local-projects", { ...currentProjects, [id]: project });
       await this.setGlobalState(page, "project-order", [id, ...currentOrder.filter((projectId) => projectId !== id)]);
       await this.setGlobalState(page, "selected-project", { type: "local", projectId: id });
-      await page.getByRole("button", { name: `在 ${name} 中新建任务`, exact: true }).waitFor({ state: "visible", timeout: 8_000 }).catch(() => undefined);
+      await page.getByRole("button", { name: projectNewTaskButtonName(name) }).waitFor({ state: "visible", timeout: 8_000 }).catch(() => undefined);
       return { id, name, rootPaths: [rootPath], threadIds: [], duplicate: false };
     });
   }
@@ -601,11 +611,11 @@ export class CodexCdpController {
       if (projectId) {
         const project = (await this.projectsFromPage(page)).find((candidate) => candidate.id === projectId);
         if (!project) throw new Error("Project not found");
-        const button = page.getByRole("button", { name: `在 ${project.name} 中新建任务`, exact: true });
+        const button = page.getByRole("button", { name: projectNewTaskButtonName(project.name) });
         if (await button.count() !== 1) throw new Error("Codex new task control is unavailable for this project");
         await button.click();
       } else {
-        const button = page.locator("button:visible").filter({ hasText: /^新建任务$/ });
+        const button = page.locator("button:visible").filter({ hasText: genericNewTaskButtonText });
         if (await button.count() !== 1) throw new Error("Codex new task control is unavailable");
         await button.click();
       }

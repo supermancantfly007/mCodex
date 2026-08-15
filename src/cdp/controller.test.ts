@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isCodexPermissionMode, isFollowUpMode, permissionModeFromLabel, selectCurrentStreamingText, selectRecentThreadIds, shouldUseAlternateFollowUpShortcut, withTimeout } from "./controller.js";
+import type { Page } from "playwright-core";
+import type { SessionStore } from "../sessions/store.js";
+import { CodexCdpController, isCodexPermissionMode, isFollowUpMode, permissionModeFromLabel, selectCurrentStreamingText, selectRecentThreadIds, shouldUseAlternateFollowUpShortcut, withTimeout } from "./controller.js";
 
 describe("withTimeout", () => {
   it("returns a value when the operation finishes in time", async () => {
@@ -96,5 +98,65 @@ describe("selectRecentThreadIds", () => {
       "client-new-thread:temporary",
       "local:pure-chat",
     ], ["local:assigned-thread", "local:historical-thread"])).toEqual(["pure-chat"]);
+  });
+});
+
+describe("CodexCdpController.createTask", () => {
+  it.each(["开始新聊天", "新建任务"])("starts a project chat when Desktop labels the action %s", async (actionLabel) => {
+    const project = { id: "project-1", name: "ashare-agent", rootPaths: ["/fixture"], threadIds: [] };
+    const expectedButtonName = `在 ${project.name} 中${actionLabel}`;
+    const threadId = "thread-new";
+    let composerContent = "";
+    let submitted = false;
+
+    const projectButton = {
+      count: async () => 1,
+      click: async () => undefined,
+    };
+    const missingButton = {
+      count: async () => 0,
+      click: async () => undefined,
+    };
+    const editor = {
+      waitFor: async () => undefined,
+      fill: async (content: string) => { composerContent = content; },
+      innerText: async () => composerContent,
+    };
+    const sendButton = {
+      count: async () => 1,
+      isDisabled: async () => false,
+      click: async () => { submitted = true; },
+    };
+    const page = {
+      getByRole: (_role: string, options: { name?: string | RegExp }) => {
+        const requestedName = options.name;
+        const matches = typeof requestedName === "string"
+          ? requestedName === expectedButtonName
+          : requestedName?.test(expectedButtonName) === true;
+        return matches ? projectButton : missingButton;
+      },
+      locator: (selector: string) => selector.includes("contenteditable")
+        ? { first: () => editor }
+        : sendButton,
+    } as unknown as Page;
+    const sessions = {
+      getThreadFile: async (id: string) => id === threadId ? "/fixture/rollout.jsonl" : null,
+      containsUserMessage: async () => true,
+    } as unknown as SessionStore;
+    const controller = new CodexCdpController("http://unused", sessions);
+    const internals = controller as unknown as {
+      mainPage: () => Promise<Page>;
+      projectsFromPage: () => Promise<typeof project[]>;
+      currentThreadId: () => Promise<string | null>;
+    };
+    internals.mainPage = async () => page;
+    internals.projectsFromPage = async () => [project];
+    internals.currentThreadId = async () => submitted ? threadId : null;
+
+    await expect(controller.createTask(project.id, "你好", "11111111-1111-4111-8111-111111111111")).resolves.toMatchObject({
+      threadId,
+      confirmed: true,
+      duplicate: false,
+    });
   });
 });
