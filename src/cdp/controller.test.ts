@@ -126,7 +126,7 @@ describe("CodexCdpController.createTask", () => {
     };
     const missingButton = {
       count: async () => 0,
-      click: async () => undefined,
+      click: async () => { throw new Error("locator did not resolve"); },
     };
     const editor = {
       waitFor: async () => undefined,
@@ -135,6 +135,9 @@ describe("CodexCdpController.createTask", () => {
     };
     const sendButton = {
       count: async () => 1,
+      last: () => sendButton,
+      first: () => sendButton,
+      or: () => sendButton,
       // React enables the composer action on the render after fill(). A real
       // Playwright click waits for that transition instead of sampling it.
       isDisabled: async () => true,
@@ -151,9 +154,11 @@ describe("CodexCdpController.createTask", () => {
           : requestedName?.test(expectedButtonName) === true;
         return matches ? projectButton : missingButton;
       },
-      locator: (selector: string) => selector.includes("contenteditable")
-        ? { first: () => editor }
-        : sendButton,
+      locator: (selector: string) => {
+        if (selector.includes("contenteditable")) return { first: () => editor };
+        if (selector.includes('aria-label*="send"')) return sendButton;
+        return missingButton;
+      },
     } as unknown as Page;
     const sessions = {
       getThreadFile: async (id: string) => id === threadId ? "/fixture/rollout.jsonl" : null,

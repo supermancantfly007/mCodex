@@ -632,7 +632,9 @@ export class CodexCdpController {
       await editor.waitFor({ state: "visible", timeout: 8_000 });
       await editor.fill(content);
       if (normalizeText(await editor.innerText()) !== normalizeText(content)) throw new Error("Composer content did not match the requested message");
-      const action = page.locator(".composer-surface-chrome button.size-token-button-composer");
+      const action = this.composerSubmitButton(page)
+        .or(page.locator(".composer-surface-chrome button.size-token-button-composer"))
+        .first();
       const sentAt = Date.now();
       try {
         // Locator.click waits for the composer action to become attached,
