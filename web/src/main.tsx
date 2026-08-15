@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowDown, ArrowLeft, Ban, Bot, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Clock3, Folder, FolderPlus, FolderSearch, Hand, ImagePlus, Languages, LoaderCircle, PlugZap, Plus, RefreshCw, Search, Send, ShieldAlert, Square, SquarePen, Terminal, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, Ban, Bell, BellOff, BellRing, Bot, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Clock3, Folder, FolderPlus, FolderSearch, Hand, ImagePlus, Languages, LoaderCircle, PlugZap, Plus, RefreshCw, Search, Send, ShieldAlert, Square, SquarePen, Terminal, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { QRCodeSVG } from "qrcode.react";
 import { createClientMessageId } from "./client-id";
 import { applyDesktopRuntime } from "./desktop-runtime";
+import { decodeApplicationServerKey, notificationThreadIdFromSearch, taskNotificationsSupported } from "./push-notifications";
 import { normalizeStoredThreadId, resolveStoredThreadId, selectedThreadStorageKey, timelineFollowState } from "./thread-view";
 import { buildDesktopTimeline, rollbackTimelineItems, shouldShowThinking, type DesktopDisplayItem, type TimelineActivityFile } from "./timeline";
 import "./styles.css";
@@ -22,6 +23,9 @@ interface DesktopState { connected?: boolean; editorReady?: boolean; currentThre
 type FollowUpMode = "queue" | "steer" | "interrupt";
 interface PendingImage { id: string; file: File; preview: string }
 interface PairingInfo { available: boolean; expiresAt: number; pairingCode: string; urls: string[] }
+type TaskNotificationState = "checking" | "unsupported" | "denied" | "disabled" | "enabled" | "error";
+interface PushPublicConfig { available: boolean; publicKey: string }
+interface PushDeliveryResult { delivered: number; failed: number; removed: number }
 
 const recentGroupId = "__recent__";
 type Locale = "zh-CN" | "en-US";
@@ -43,6 +47,10 @@ const translations: Record<string, string> = {
   "已处理": "Processed", "运行了 {count} 个命令": "Ran {count} commands", "运行了多个命令": "Ran multiple commands", "运行了 1 个命令": "Ran 1 command",
   "仅支持 10 MB 以内的 AVIF、GIF、JPEG、PNG 或 WebP 图片": "Only AVIF, GIF, JPEG, PNG, or WebP images up to 10 MB are supported", "每条消息最多添加 4 张图片": "You can attach up to 4 images per message",
   "Codex 远程控制": "Codex Remote Control", "本地任务工作台": "Local task workspace", "新建任务": "New task", "创建项目": "Create project", "刷新任务": "Refresh tasks",
+  "任务完成通知": "Task completion notifications", "通知已开启": "Notifications enabled", "通知未开启": "Notifications disabled", "通知不可用": "Notifications unavailable", "通知权限已关闭": "Notification permission denied", "正在检查通知设置": "Checking notification settings",
+  "Codex 任务完成后，即使关闭网页 App，也会发送系统通知。通知不会包含回答正文。": "Receive a system notification when a Codex task completes, even when the web app is closed. Answer text is never included.",
+  "需要 iOS 16.4 或更高版本，并从主屏幕图标打开 mCodex。": "Requires iOS 16.4 or later and mCodex opened from its Home Screen icon.", "请在 iPhone 设置的通知列表中允许 mCodex 通知。": "Allow mCodex in the iPhone notification settings.",
+  "开启通知": "Enable notifications", "关闭通知": "Disable notifications", "发送测试通知": "Send test notification", "测试通知已发送": "Test notification sent", "正在处理…": "Working…", "无法开启任务通知，请检查系统通知权限后重试": "Could not enable task notifications. Check system notification permissions and try again.", "无法更新任务通知设置": "Could not update task notification settings", "测试通知发送失败": "Test notification could not be sent",
   "正在连接": "Connecting", "实时连接": "Live connection", "连接断开": "Disconnected", "连接控制": "Control connection", "可控制": "Controllable", "只读": "Read-only", "搜索任务": "Search tasks",
   "折叠 {name}": "Collapse {name}", "展开 {name}": "Expand {name}", "在 {name} 中新建任务": "New task in {name}", "暂无摘要": "No summary", "暂无任务": "No tasks", "最近": "Recent", "展开或折叠最近任务": "Expand or collapse recent tasks", "新建普通对话": "New conversation", "没有找到相关任务": "No matching tasks",
   "返回任务列表": "Back to task list", "停止任务": "Stop task", "停止": "Stop", "批准": "Approve", "拒绝": "Reject", "正在加载对话": "Loading conversation", "正在思考": "Thinking", "最新消息": "Latest", "跳到最新消息": "Jump to latest message", "更改 Desktop 权限": "Change Desktop permissions", "Desktop 权限暂不可用": "Desktop permissions unavailable", "添加图片": "Attach image", "移除 {name}": "Remove {name}", "正在连接当前任务的控制…": "Connecting to task controls…", "正在发送，请稍候…": "Sending, please wait…", "正在连接桌面控制…": "Connecting to Desktop controls…", "向当前任务发送消息": "Send a message to the current task", "桌面控制尚未连接，当前为只读模式": "Desktop controls are not connected; read-only mode", "正在发送": "Sending", "发送": "Send",
@@ -98,6 +106,11 @@ async function api<T>(url: string, init?: RequestInit, timeoutMs = 30_000): Prom
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+async function taskNotificationRegistration(): Promise<ServiceWorkerRegistration> {
+  await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+  return navigator.serviceWorker.ready;
 }
 
 function imageSource(source: string, threadId: string): string {
@@ -230,6 +243,45 @@ function ProcessingSummary({ display }: { display: Extract<DisplayItem, { type: 
   </section>;
 }
 
+function NotificationSettings({
+  state,
+  busy,
+  notice,
+  error,
+  onEnable,
+  onDisable,
+  onTest,
+}: {
+  state: TaskNotificationState;
+  busy: boolean;
+  notice: string;
+  error: string;
+  onEnable: () => void;
+  onDisable: () => void;
+  onTest: () => void;
+}) {
+  const enabled = state === "enabled";
+  const denied = state === "denied";
+  const unsupported = state === "unsupported";
+  const checking = state === "checking";
+  const title = checking ? t("正在检查通知设置") : enabled ? t("通知已开启") : denied ? t("通知权限已关闭") : unsupported ? t("通知不可用") : t("通知未开启");
+  return <div className="notification-settings">
+    <span className={`notification-state-icon${enabled ? " enabled" : denied || unsupported ? " unavailable" : ""}`}>
+      {checking ? <LoaderCircle className="spin" size={23} /> : enabled ? <BellRing size={23} /> : denied || unsupported ? <BellOff size={23} /> : <Bell size={23} />}
+    </span>
+    <strong>{title}</strong>
+    <p>{unsupported ? t("需要 iOS 16.4 或更高版本，并从主屏幕图标打开 mCodex。") : denied ? t("请在 iPhone 设置的通知列表中允许 mCodex 通知。") : t("Codex 任务完成后，即使关闭网页 App，也会发送系统通知。通知不会包含回答正文。")}</p>
+    {notice && <div className="notification-notice"><CheckCircle2 size={16} />{notice}</div>}
+    {error && <div className="dialog-error"><CircleAlert size={16} />{error}</div>}
+    {!checking && !unsupported && !denied && <div className="dialog-actions">
+      {enabled ? <>
+        <button type="button" className="secondary" onClick={onDisable} disabled={busy}>{t("关闭通知")}</button>
+        <button type="button" className="primary" onClick={onTest} disabled={busy}>{busy && <LoaderCircle className="spin" size={16} />}{busy ? t("正在处理…") : t("发送测试通知")}</button>
+      </> : <button type="button" className="primary" onClick={onEnable} disabled={busy}>{busy && <LoaderCircle className="spin" size={16} />}{busy ? t("正在处理…") : t("开启通知")}</button>}
+    </div>}
+  </div>;
+}
+
 function isActivelyRunning(thread: Thread, _desktopThreadId: string | null = null): boolean {
   return thread.status === "running";
 }
@@ -264,8 +316,11 @@ function App() {
   const [controlBusy, setControlBusy] = useState(false);
   const [desktopApproval, setDesktopApproval] = useState<Approval | null>(null);
   const [desktopPermissions, setDesktopPermissions] = useState<DesktopPermission>({ mode: null, label: null, available: false });
-  const [dialog, setDialog] = useState<"task" | "project" | "permissions" | "follow-up" | null>(null);
+  const [dialog, setDialog] = useState<"task" | "project" | "permissions" | "follow-up" | "notifications" | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
+  const [notificationState, setNotificationState] = useState<TaskNotificationState>("checking");
+  const [notificationBusy, setNotificationBusy] = useState(false);
+  const [notificationNotice, setNotificationNotice] = useState("");
   const [followUpSubmitting, setFollowUpSubmitting] = useState<FollowUpMode | null>(null);
   const [permissionConfirm, setPermissionConfirm] = useState(false);
   const [newTaskProjectId, setNewTaskProjectId] = useState("");
@@ -281,7 +336,7 @@ function App() {
   const timelineTouchYRef = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<string | null>(null);
-  const pendingThreadRestoreRef = useRef<string | null>(normalizeStoredThreadId(localStorage.getItem(selectedThreadStorageKey)));
+  const pendingThreadRestoreRef = useRef<string | null>(normalizeStoredThreadId(notificationThreadIdFromSearch(location.search) ?? localStorage.getItem(selectedThreadStorageKey)));
   const openRequestRef = useRef(0);
   const lastAutoExpandedRef = useRef("");
 
@@ -340,6 +395,114 @@ function App() {
     setPermissionConfirm(false);
     setError("");
     setDialog("permissions");
+  }
+
+  function openNotificationsDialog() {
+    setError("");
+    setNotificationNotice("");
+    setDialog("notifications");
+    void refreshTaskNotificationState(false);
+  }
+
+  async function refreshTaskNotificationState(silent = true) {
+    if (!taskNotificationsSupported()) {
+      setNotificationState("unsupported");
+      return;
+    }
+    setNotificationState("checking");
+    try {
+      if (Notification.permission === "denied") {
+        setNotificationState("denied");
+        return;
+      }
+      const registration = await taskNotificationRegistration();
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        setNotificationState("disabled");
+        return;
+      }
+      await api("/api/push/subscriptions", { method: "POST", body: JSON.stringify({ subscription: subscription.toJSON() }) });
+      setNotificationState("enabled");
+    } catch (cause) {
+      setNotificationState("error");
+      if (!silent) setError(t("无法更新任务通知设置"));
+    }
+  }
+
+  async function enableTaskNotifications() {
+    if (notificationBusy) return;
+    setNotificationBusy(true);
+    setNotificationNotice("");
+    setError("");
+    try {
+      if (!taskNotificationsSupported()) {
+        setNotificationState("unsupported");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setNotificationState(permission === "denied" ? "denied" : "disabled");
+        return;
+      }
+      const [{ publicKey }, registration] = await Promise.all([
+        api<PushPublicConfig>("/api/push"),
+        taskNotificationRegistration(),
+      ]);
+      const subscription = await registration.pushManager.getSubscription()
+        ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeApplicationServerKey(publicKey) });
+      await api("/api/push/subscriptions", { method: "POST", body: JSON.stringify({ subscription: subscription.toJSON() }) });
+      setNotificationState("enabled");
+      const delivery = await api<PushDeliveryResult>("/api/push/test", { method: "POST", body: JSON.stringify({ endpoint: subscription.endpoint }) });
+      if (delivery.delivered > 0) setNotificationNotice(t("测试通知已发送"));
+      else setError(t("测试通知发送失败"));
+    } catch {
+      setNotificationState(Notification.permission === "denied" ? "denied" : "error");
+      setError(t("无法开启任务通知，请检查系统通知权限后重试"));
+    } finally {
+      setNotificationBusy(false);
+    }
+  }
+
+  async function disableTaskNotifications() {
+    if (notificationBusy || !taskNotificationsSupported()) return;
+    setNotificationBusy(true);
+    setNotificationNotice("");
+    setError("");
+    try {
+      const registration = await taskNotificationRegistration();
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await api("/api/push/subscriptions", { method: "DELETE", body: JSON.stringify({ endpoint: subscription.endpoint }) });
+        await subscription.unsubscribe();
+      }
+      setNotificationState("disabled");
+    } catch {
+      setError(t("无法更新任务通知设置"));
+    } finally {
+      setNotificationBusy(false);
+    }
+  }
+
+  async function sendTestTaskNotification() {
+    if (notificationBusy || !taskNotificationsSupported()) return;
+    setNotificationBusy(true);
+    setNotificationNotice("");
+    setError("");
+    try {
+      const registration = await taskNotificationRegistration();
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        setNotificationState("disabled");
+        return;
+      }
+      const delivery = await api<PushDeliveryResult>("/api/push/test", { method: "POST", body: JSON.stringify({ endpoint: subscription.endpoint }) });
+      if (delivery.delivered < 1) throw new Error("Push delivery failed");
+      setNotificationNotice(t("测试通知已发送"));
+    } catch {
+      setError(t("测试通知发送失败"));
+    } finally {
+      setNotificationBusy(false);
+    }
   }
 
   async function refreshThreads() {
@@ -484,6 +647,20 @@ function App() {
     return () => window.removeEventListener("bridge-auth-required", handleAuthRequired);
   }, []);
   useEffect(() => { localStorage.setItem("expandedProjectIds", JSON.stringify([...expandedProjects])); }, [expandedProjects]);
+  useEffect(() => {
+    if (!taskNotificationsSupported()) {
+      setNotificationState("unsupported");
+      return;
+    }
+    void refreshTaskNotificationState(true);
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "mcodex:open-thread") return;
+      const threadId = normalizeStoredThreadId(event.data.threadId);
+      if (threadId) void openThread(threadId);
+    };
+    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
+  }, [authEpoch]);
   useEffect(() => {
     if (!desktopThreadId) return;
     const projectId = projectForThread.get(desktopThreadId) ?? recentGroupId;
@@ -799,7 +976,7 @@ function App() {
 
   return <main className={`app${selected ? " thread-open" : ""}${needsPairing ? " pairing-open" : ""}`}>
     <aside className="sidebar">
-      <header className="brand"><div className="brand-mark"><Terminal size={19} /></div><div><strong>{t("Codex 远程控制")}</strong><span>{t("本地任务工作台")}</span></div><div className="brand-actions"><button className="icon-button" onClick={() => openTaskDialog()} title={t("新建任务")} disabled={!cdpReady}><SquarePen size={18} /></button><button className="icon-button" onClick={() => setDialog("project")} title={t("创建项目")} disabled={!cdpReady}><FolderPlus size={18} /></button><button className="icon-button" onClick={() => { void refreshThreads(); void refreshProjects(); }} title={t("刷新任务")}><RefreshCw size={18} /></button><button className="language-toggle" onClick={() => setLocaleState(locale === "zh-CN" ? "en-US" : "zh-CN")} title={locale === "zh-CN" ? "Switch to English" : "切换到中文"}><Languages size={17} /><span>{locale === "zh-CN" ? "EN" : "中"}</span></button></div></header>
+      <header className="brand"><div className="brand-mark"><Terminal size={19} /></div><div><strong>{t("Codex 远程控制")}</strong><span>{t("本地任务工作台")}</span></div><div className="brand-actions"><button className="icon-button" onClick={() => openTaskDialog()} title={t("新建任务")} disabled={!cdpReady}><SquarePen size={18} /></button><button className="icon-button" onClick={() => setDialog("project")} title={t("创建项目")} disabled={!cdpReady}><FolderPlus size={18} /></button><button className={`icon-button notification-toggle${notificationState === "enabled" ? " enabled" : ""}`} onClick={openNotificationsDialog} title={t("任务完成通知")} aria-pressed={notificationState === "enabled"}>{notificationState === "enabled" ? <BellRing size={18} /> : notificationState === "denied" || notificationState === "unsupported" ? <BellOff size={18} /> : <Bell size={18} />}</button><button className="icon-button" onClick={() => { void refreshThreads(); void refreshProjects(); }} title={t("刷新任务")}><RefreshCw size={18} /></button><button className="language-toggle" onClick={() => setLocaleState(locale === "zh-CN" ? "en-US" : "zh-CN")} title={locale === "zh-CN" ? "Switch to English" : "切换到中文"}><Languages size={17} /><span>{locale === "zh-CN" ? "EN" : "中"}</span></button></div></header>
       <div className="connection-row"><span className={`dot${connected === true ? " online" : connected === null ? " pending" : ""}`} />{connected === null ? t("正在连接") : connected ? t("实时连接") : t("连接断开")}<span className="divider" /><PlugZap size={14} />{cdpReady === null ? t("连接控制") : cdpReady ? t("可控制") : t("只读")}</div>
       <label className="search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索任务")} /></label>
       <div className="thread-list">
@@ -880,10 +1057,18 @@ function App() {
         </footer>
       </> : <div className={`empty${needsPairing ? " pairing-empty" : ""}`}><div className="empty-mark"><Terminal size={28} /></div><h1>{needsPairing ? t("连接这台电脑") : t("选择一个任务")}</h1><p>{needsPairing ? pairing ? t("正在验证并加载任务，请稍候…") : t("手机与电脑连接同一 Wi-Fi 后，可扫码或输入配对码。") : t("任务进度会从本地会话文件实时同步。")}</p>{needsPairing && pairingInfo?.urls[0] && <section className="pairing-qr" aria-label={t("手机扫码连接")}><div className="pairing-qr-code"><QRCodeSVG value={pairingInfo.urls[0]} size={196} level="M" marginSize={1} /></div><div className="pairing-qr-copy"><strong>{t("用手机扫码使用")}</strong><span>{t("打开手机相机扫描二维码，将自动连接这台电脑。")}</span><small>{t("配对码")} {pairingInfo.pairingCode}</small></div></section>}{error && <div className="error-bar"><CircleAlert size={16} />{error}</div>}{needsPairing && <form className="token-form" onSubmit={(event) => void pairDevice(event)} aria-busy={pairing}><input value={pairingCode} onChange={(event) => setPairingCode(event.target.value)} placeholder={t("配对码")} aria-label={t("配对码")} autoComplete="one-time-code" disabled={pairing} /><button type="submit" disabled={pairing || !pairingCode.trim()}>{pairing && <LoaderCircle className="spin" size={16} aria-hidden="true" />}{pairing ? t("正在配对") : t("开始配对")}</button></form>}</div>}
     </section>
-    {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !dialogBusy) setDialog(null); }}>
+    {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !dialogBusy && !notificationBusy) setDialog(null); }}>
       <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-        <header><h2 id="dialog-title">{dialog === "task" ? t("新建任务") : dialog === "project" ? t("创建项目") : dialog === "follow-up" ? t("任务正在运行") : permissionConfirm ? t("确认完全访问") : t("Desktop 权限")}</h2><button className="icon-button" onClick={() => { setDialog(null); setPermissionConfirm(false); }} disabled={dialogBusy} title={t("关闭")}><X size={19} /></button></header>
-        {dialog === "follow-up" ? <div className="follow-up-options">
+        <header><h2 id="dialog-title">{dialog === "task" ? t("新建任务") : dialog === "project" ? t("创建项目") : dialog === "follow-up" ? t("任务正在运行") : dialog === "notifications" ? t("任务完成通知") : permissionConfirm ? t("确认完全访问") : t("Desktop 权限")}</h2><button className="icon-button" onClick={() => { setDialog(null); setPermissionConfirm(false); }} disabled={dialogBusy || notificationBusy} title={t("关闭")}><X size={19} /></button></header>
+        {dialog === "notifications" ? <NotificationSettings
+          state={notificationState}
+          busy={notificationBusy}
+          notice={notificationNotice}
+          error={error}
+          onEnable={() => void enableTaskNotifications()}
+          onDisable={() => void disableTaskNotifications()}
+          onTest={() => void sendTestTaskNotification()}
+        /> : dialog === "follow-up" ? <div className="follow-up-options">
           <p className="follow-up-intro">{t("这条消息将作为正在运行任务的后续指令发送：")}</p>
           <div className="follow-up-preview">{pendingImages.length > 0 && <span className="follow-up-image-count">{t("已附加 {count} 张图片", { count: pendingImages.length })}</span>}{followUpContent}</div>
           {followUpModes.map((option) => {

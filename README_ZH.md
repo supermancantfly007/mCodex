@@ -89,6 +89,19 @@ macOS 推荐使用原生控制 App。只需安装一次：
 
 不安装 Tailscale 等组网客户端，也可以通过“VPS Caddy + SSH 反向隧道 + Cloudflare Access”提供普通 HTTPS 网页入口。原生控制 App 会统一管理 Bridge 与 SSH 隧道。详见 [VPS 公网部署指南](deploy/README_ZH.md)。只允许转发 mCodex 的 `3210` 端口，任何情况下都不要暴露 Codex 控制端口 `9222`。
 
+### iPhone 任务完成通知
+
+iOS/iPadOS 16.4 或更高版本支持 mCodex 的任务完成 Web Push：
+
+1. 在 Safari 中打开 mCodex，并选择“添加到主屏幕”。
+2. 从主屏幕图标重新打开 mCodex。
+3. 点击左上角的铃铛，再点击“开启通知”。
+4. 允许系统通知；首次开启会立即发送一条测试通知。
+
+以后即使关闭网页 App，Codex 任务完成时也会收到系统通知；点击通知会直接进入对应会话。锁屏通知只显示任务已完成，不包含回答正文。Mac 上的 mCodex Control、Bridge 和网络需要保持运行。
+
+VAPID 私钥和设备 Push subscription 自动保存在 Bridge Token 同目录的 `web-push-state.json`，文件权限为 `600`，不得提交到 Git 或复制给其他人。旧的主屏幕图标如果没有显示通知入口，请删除后重新“添加到主屏幕”。
+
 ## 可以做什么
 
 - 按项目浏览任务并跟进实时输出

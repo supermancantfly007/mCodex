@@ -6,6 +6,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
 const configuredToken = process.env.BRIDGE_TOKEN?.trim() ?? "";
 const loopbackHosts = ["127.0.0.1", "localhost", "::1"];
+const defaultPushSubject = "https://github.com/supermancantfly007/mCodex";
 
 export function resolveExternalAccess(hostname: string, configured: string | undefined): boolean {
   const exposedByHost = !loopbackHosts.includes(hostname.toLowerCase());
@@ -15,9 +16,18 @@ export function resolveExternalAccess(hostname: string, configured: string | und
   throw new Error("BRIDGE_EXTERNAL_ACCESS must be true or false when it is set");
 }
 
+export function resolvePushSubject(configured: string | undefined): string {
+  const candidate = configured?.trim() || defaultPushSubject;
+  let url: URL;
+  try { url = new URL(candidate); } catch { throw new Error("BRIDGE_PUSH_SUBJECT must be an HTTPS or mailto URL"); }
+  if (!["https:", "mailto:"].includes(url.protocol)) throw new Error("BRIDGE_PUSH_SUBJECT must be an HTTPS or mailto URL");
+  return candidate;
+}
+
 const external = resolveExternalAccess(host, process.env.BRIDGE_EXTERNAL_ACCESS);
 const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
 const tokenFile = process.env.BRIDGE_TOKEN_FILE?.trim() || path.join(codexHome, "remote-bridge-token");
+const pushStateFile = process.env.BRIDGE_PUSH_STATE_FILE?.trim() || path.join(path.dirname(tokenFile), "web-push-state.json");
 
 function persistentToken(): { value: string; persisted: boolean } {
   if (!external) return { value: "", persisted: false };
@@ -55,6 +65,8 @@ export const config = {
   tokenGenerated: external && !configuredToken && !resolvedToken.persisted,
   tokenPersisted: external && !configuredToken && resolvedToken.persisted,
   tokenFile,
+  pushStateFile,
+  pushSubject: resolvePushSubject(process.env.BRIDGE_PUSH_SUBJECT),
   port: Number(process.env.BRIDGE_PORT ?? 3210),
   token,
   codexHome,

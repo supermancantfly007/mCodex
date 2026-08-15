@@ -35,6 +35,25 @@ describe("SessionWatcher", () => {
     await readGrowth(filePath);
 
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ threadId, item: null, rollbackTurns: 2 });
+    expect(events[0]).toMatchObject({ threadId, item: null, rollbackTurns: 2, eventType: "thread_rolled_back" });
+  });
+
+  it("preserves completion event types for notification delivery", async () => {
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), "mcodex-watcher-"));
+    tempDirs.push(codexHome);
+    const sessionsDir = path.join(codexHome, "sessions");
+    await mkdir(sessionsDir);
+    const threadId = "019fdb3a-224d-7940-8af2-d4e3f0c052b2";
+    const filePath = path.join(sessionsDir, `rollout-${threadId}.jsonl`);
+    await writeFile(filePath, `${JSON.stringify({ timestamp: "2026-01-01T00:00:00Z", type: "event_msg", payload: { type: "task_complete" } })}\n`);
+    const watcher = new SessionWatcher(codexHome, 500);
+    const events: BridgeEvent[] = [];
+    watcher.on("event", (event: BridgeEvent) => events.push(event));
+
+    const readGrowth = (watcher as unknown as { readGrowth(filePath: string): Promise<void> }).readGrowth.bind(watcher);
+    await readGrowth(filePath);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ threadId, status: "completed", eventType: "task_complete" });
   });
 });

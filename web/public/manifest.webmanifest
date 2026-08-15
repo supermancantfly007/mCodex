@@ -1,0 +1,26 @@
+{
+  "name": "mCodex Remote",
+  "short_name": "mCodex",
+  "description": "在手机上查看和控制 Codex Desktop 任务",
+  "lang": "zh-CN",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#111714",
+  "icons": [
+    {
+      "src": "/icons/mcodex-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/mcodex-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

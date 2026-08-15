@@ -50,4 +50,5 @@ export interface BridgeEvent {
   item: TimelineItem | null;
   status?: ThreadStatus;
   rollbackTurns?: number;
+  eventType?: string;
 }

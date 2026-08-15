@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveExternalAccess } from "./config.js";
+import { resolveExternalAccess, resolvePushSubject } from "./config.js";
 
 describe("resolveExternalAccess", () => {
   it("requires remote authentication on non-loopback listeners", () => {
@@ -21,5 +21,16 @@ describe("resolveExternalAccess", () => {
     expect(() => resolveExternalAccess("127.0.0.1", "sometimes")).toThrow(
       "BRIDGE_EXTERNAL_ACCESS must be true or false when it is set",
     );
+  });
+});
+
+describe("resolvePushSubject", () => {
+  it("accepts HTTPS and mailto VAPID contacts", () => {
+    expect(resolvePushSubject("https://example.com/contact")).toBe("https://example.com/contact");
+    expect(resolvePushSubject("mailto:admin@example.com")).toBe("mailto:admin@example.com");
+  });
+
+  it("rejects VAPID contacts that push services cannot use", () => {
+    expect(() => resolvePushSubject("http://example.com")).toThrow("BRIDGE_PUSH_SUBJECT");
   });
 });

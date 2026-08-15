@@ -89,6 +89,12 @@ The pairing code is valid for 10 minutes and the native app rotates it automatic
 
 You do not need Tailscale or another private-network client. A normal HTTPS endpoint can be built with VPS Caddy, an SSH reverse tunnel, and Cloudflare Access. On macOS, the native control app manages the Bridge and reverse tunnel together; see the [Chinese VPS deployment guide](deploy/README_ZH.md). Only forward the mCodex service on port `3210`; never expose the Codex control port `9222`.
 
+### iPhone task completion notifications
+
+On iOS/iPadOS 16.4 or later, add mCodex to the Home Screen, open it from the new icon, and use the bell button to enable notifications. The first opt-in sends a test notification. Later task completions can notify the phone even when the web app is closed, and tapping a notification opens the corresponding thread. Lock-screen notifications never include answer text. The Mac, mCodex Bridge, and network must remain online.
+
+Web Push keys and device subscriptions are generated automatically in a private `web-push-state.json` next to the Bridge token. Do not commit or share this file. Remove and re-add an older Home Screen shortcut if it does not expose notification controls.
+
 ## What you can do
 
 - Browse projects and follow live task output

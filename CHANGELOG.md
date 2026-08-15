@@ -9,6 +9,7 @@
 - 增加 VPS Caddy、SSH 反向隧道、Cloudflare Access 和 LaunchAgent 公网部署模板
 - 增加 macOS Docker Compose 启动方式，将 Bridge/Web 与 SSH 反向隧道作为本地容器统一启停
 - 增加原生常驻 macOS 控制 App，不依赖 Docker，直接管理 Bridge 与 SSH 隧道，并显示、手动刷新和自动轮换配对码
+- 增加 iPhone 主屏幕 Web App 的任务完成通知，支持测试通知和点击直达对应会话
 
 ### Changed
 
@@ -19,6 +20,7 @@
 
 - 新增 `BRIDGE_EXTERNAL_ACCESS`，允许 Bridge 只监听回环地址时仍强制启用配对和设备 Token 鉴权
 - 公网部署模板禁止代理本机配对信息，并默认丢弃可能包含 Token 的访问日志
+- Web Push 的 VAPID 私钥与设备订阅仅保存在权限为 `600` 的本地状态文件中，锁屏通知不包含回答正文
 
 ## [0.1.1] - 2026-08-12
 

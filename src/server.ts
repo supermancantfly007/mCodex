@@ -13,6 +13,7 @@ import { SessionStore } from "./sessions/store.js";
 import { SessionWatcher } from "./sessions/watcher.js";
 import { reconcileRuntimeStatuses } from "./runtime-status.js";
 import { createPairingCodes } from "./pairing.js";
+import { InvalidPushSubscriptionError, TaskNotificationService } from "./push/notifications.js";
 import type { BridgeEvent, TimelineItem } from "./types.js";
 
 class BadRequestError extends Error {}
@@ -84,6 +85,8 @@ export async function createBridge() {
   const sessions = new SessionStore(config.codexHome);
   const watcher = new SessionWatcher(config.codexHome, config.scanIntervalMs);
   const cdp = new CodexCdpController(config.cdpUrl, sessions);
+  const notifications = new TaskNotificationService(config.pushStateFile, serverLocale, config.pushSubject);
+  await notifications.initialize();
   const app = express();
   app.disable("x-powered-by");
   app.use(compression({ threshold: 1_024 }));
@@ -136,6 +139,30 @@ export async function createBridge() {
 
   app.get("/api/status", async (_req, res) => {
     res.json({ cdp: await cdp.status(), codexHome: config.codexHome, pairing: { available: config.external } });
+  });
+  app.get("/api/push", (_req, res) => {
+    res.json(notifications.publicConfig());
+  });
+  app.post("/api/push/subscriptions", async (req, res, next) => {
+    try {
+      res.json(await notifications.subscribe(req.body?.subscription));
+    } catch (error) {
+      next(error instanceof InvalidPushSubscriptionError ? new BadRequestError(error.message) : error);
+    }
+  });
+  app.delete("/api/push/subscriptions", async (req, res, next) => {
+    try {
+      res.json(await notifications.unsubscribe(req.body?.endpoint));
+    } catch (error) {
+      next(error instanceof InvalidPushSubscriptionError ? new BadRequestError(error.message) : error);
+    }
+  });
+  app.post("/api/push/test", async (req, res, next) => {
+    try {
+      res.json(await notifications.sendTest(req.body?.endpoint));
+    } catch (error) {
+      next(error instanceof InvalidPushSubscriptionError ? new BadRequestError(error.message) : error);
+    }
   });
   app.put("/api/permissions", async (req, res, next) => {
     try {
@@ -333,8 +360,21 @@ export async function createBridge() {
     }
     wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request));
   });
+  const notifiedCompletionEvents = new Set<string>();
   watcher.on("event", (event: BridgeEvent) => {
     broadcast({ type: "session_event", event });
+    if (event.status === "completed"
+      && ["task_complete", "turn_completed"].includes(event.eventType ?? "")
+      && !notifiedCompletionEvents.has(event.id)) {
+      notifiedCompletionEvents.add(event.id);
+      if (notifiedCompletionEvents.size > 2_048) {
+        const oldest = notifiedCompletionEvents.values().next().value;
+        if (typeof oldest === "string") notifiedCompletionEvents.delete(oldest);
+      }
+      void notifications.sendTaskCompleted(event.threadId).catch(() => {
+        console.warn("Web Push completion notification could not be delivered.");
+      });
+    }
   });
   let desktopPollBusy = false;
   let lastDesktopState = "";

@@ -102,6 +102,7 @@ export class SessionWatcher extends EventEmitter {
               item,
               status,
               rollbackTurns: rollbackTurns || undefined,
+              eventType: eventType || undefined,
             };
             this.emit("event", event);
           }

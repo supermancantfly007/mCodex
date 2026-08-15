@@ -56,9 +56,11 @@ button { color: inherit; }
   display: flex;
   flex-direction: column;
 }
+.brand > div:nth-child(2) strong, .brand > div:nth-child(2) span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .brand-actions { display: flex; align-items: center; gap: 1px; }
 .brand-actions .icon-button { width: 32px; height: 32px; }
+.notification-toggle.enabled { color: #2f7f59; background: #e3f1e9; }
 .language-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 38px; height: 27px; padding: 0 3px; border: 1px solid #d8d8d2; border-radius: 5px; background: transparent; color: #5f625c; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
 .language-toggle svg { width: 14px; height: 14px; }
 .language-toggle:hover { background: #e9e9e6; color: #1f2822; }
@@ -690,6 +692,14 @@ button { color: inherit; }
 .permission-confirm .dialog-actions { width: 100%; margin-top: 4px; }
 .dialog-error { width: 100%; padding: 9px 10px; display: flex; align-items: flex-start; gap: 7px; border: 1px solid #e3b8b4; border-radius: 6px; background: #fff3f2; color: #a43f39; font-size: 12px; line-height: 1.45; }
 .dialog-error svg { flex: none; margin-top: 1px; }
+.notification-settings { padding: 20px 18px 18px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.notification-state-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 8px; background: #ecece8; color: #62665f; }
+.notification-state-icon.enabled { background: #e3f1e9; color: #2f7f59; }
+.notification-state-icon.unavailable { background: #f3e8e6; color: #a04b43; }
+.notification-settings > strong { color: #292a27; font-size: 15px; }
+.notification-settings > p { margin: 0; color: #656861; font-size: 13px; line-height: 1.6; }
+.notification-settings .dialog-actions { width: 100%; margin-top: 4px; }
+.notification-notice { width: 100%; padding: 9px 10px; display: flex; align-items: center; gap: 7px; border: 1px solid #b9d9c7; border-radius: 6px; background: #eff8f3; color: #2f7251; font-size: 12px; }
 
 @media (max-width: 720px) {
   .app { display: block; height: 100dvh; }
@@ -719,6 +729,11 @@ button { color: inherit; }
   .dialog { width: 100%; max-height: calc(100dvh - 20px); }
   .dialog form { padding: 16px; }
   .project-new-task:not(:disabled) { opacity: 1; }
+}
+@media (max-width: 360px) {
+  .brand { padding-inline: 9px; gap: 7px; }
+  .brand-mark { width: 34px; height: 34px; }
+  .brand > div:nth-child(2) span { display: none; }
 }
 .folder-browser-backdrop { z-index: 60; }
 .folder-browser { display: flex; flex-direction: column; max-height: min(680px, calc(100dvh - 40px)); min-height: 360px; }
